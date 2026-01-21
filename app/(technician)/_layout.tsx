@@ -87,41 +87,21 @@ export default function TechnicianLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="create-visit"
-        options={{
-          href: null, // This removes it from tabs
-          tabBarStyle: { display: 'none' },
-        }}
-      />
-      <Tabs.Screen
-        name="select-site"
-        options={{
-          href: null, // hide mini-page from tabs
-          tabBarStyle: { display: 'none' },
-        }}
-      />
-      <Tabs.Screen
-        name="task-detail"
-        options={{
-          href: null, // hide from tabs
-          tabBarStyle: { display: 'none' },
-        }}
-      />
-      <Tabs.Screen
-        name="parts"
-        options={{
-          href: null,
-          tabBarStyle: { display: 'none' },
-        }}
-      />
-      <Tabs.Screen
-        name="request-part"
-        options={{
-          href: null,
-          tabBarStyle: { display: 'none' },
-        }}
-      />
+      <Tabs.Screen name="ai-assistant" options={{ href: null }} />
+      <Tabs.Screen name="create-visit" options={{ href: null }} />
+      <Tabs.Screen name="install-part" options={{ href: null }} />
+      <Tabs.Screen name="parts" options={{ href: null }} />
+      <Tabs.Screen name="request-part" options={{ href: null }} />
+      <Tabs.Screen name="select-site" options={{ href: null }} />
+      <Tabs.Screen name="task-detail" options={{ href: null }} />
+      <Tabs.Screen name="maintenance" options={{ href: null }} />
+      <Tabs.Screen name="maintenance/index" options={{ href: null }} />
+      <Tabs.Screen name="maintenance/equipment" options={{ href: null }} />
+      <Tabs.Screen name="maintenance/equipment/[type]" options={{ href: null }} />
+      <Tabs.Screen name="maintenance/[id]" options={{ href: null }} />
+      <Tabs.Screen name="refueling" options={{ href: null }} />
+      <Tabs.Screen name="refueling/index" options={{ href: null }} />
+      <Tabs.Screen name="refueling/form" options={{ href: null }} />
     </Tabs>
   );
 }

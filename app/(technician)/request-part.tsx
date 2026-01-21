@@ -8,10 +8,11 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { FontAwesome5 } from '@expo/vector-icons';
+import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -23,18 +24,25 @@ export default function RequestPartScreen() {
   
   const [partId, setPartId] = useState(params.partId || '');
   const [partName, setPartName] = useState(params.partName || '');
+  
+  // New Fields
+  const [site, setSite] = useState('');
+  const [equipment, setEquipment] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [urgency, setUrgency] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
-  const [notes, setNotes] = useState('');
-  const [site, setSite] = useState('');
+  const [description, setDescription] = useState('');
+
+  // Mock Data for Dropdowns
+  const sites = ['Site A - Lagos', 'Site B - Abuja', 'Site C - Kano']; 
+  const equipments = ['Generator #1', 'Generator #2', 'Cooling System', 'Control Panel'];
 
   const handleSubmit = async () => {
     if (!partId) {
       Alert.alert('Error', 'Please select a part');
       return;
     }
-    if (!quantity || parseInt(quantity) <= 0) {
-      Alert.alert('Error', 'Please enter a valid quantity');
+    if (!site || !equipment || !quantity || !description) {
+      Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
@@ -43,11 +51,12 @@ export default function RequestPartScreen() {
       const payload = {
         items: [{
           part: partId,
+          part_name: partName, // helpful for backend if not joining
           quantity: parseInt(quantity)
         }],
+        site_name: site,
         urgency,
-        notes,
-        site
+        notes: `Equipment: ${equipment}\nIssue: ${description}`, // Mapping to existing backend notes field
       };
 
       await api.post('/parts/requests', payload);
@@ -63,118 +72,134 @@ export default function RequestPartScreen() {
     }
   };
 
-  const UrgencyOption = ({ value, label, color }: { value: typeof urgency, label: string, color: string }) => (
-    <TouchableOpacity
-      style={[
-        styles.urgencyOption,
-        urgency === value && { backgroundColor: color + '20', borderColor: color }
-      ]}
-      onPress={() => setUrgency(value)}
-    >
-      <View style={[styles.radio, urgency === value && { borderColor: color }]}>
-        {urgency === value && <View style={[styles.radioDot, { backgroundColor: color }]} />}
-      </View>
-      <Text style={[styles.urgencyText, urgency === value && { color: color, fontWeight: 'bold' }]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
+  const Dropdown = ({ label, value, options, onSelect }: any) => (
+    <View style={styles.fieldContainer}>
+        <Text style={styles.label}>{label} <Text style={styles.required}>*</Text></Text>
+        <TouchableOpacity style={styles.pickerButton} onPress={() => {
+            // In a real app, open a modal or picker. For now, just cycle or alerts
+            // Simple mock implementation:
+            const nextIndex = (options.indexOf(value) + 1) % options.length;
+            onSelect(options[nextIndex] || options[0]);
+        }}>
+            <Text style={value ? styles.inputText : styles.placeholder}>
+                {value || `Select ${label.toLowerCase()}`}
+            </Text>
+            <FontAwesome5 name="chevron-down" size={14} color={Colors.textSecondary} />
+        </TouchableOpacity>
+        {/* Helper Note for Demo */}
+        <Text style={{fontSize: 10, color: Colors.textSecondary, marginTop: 4}}>* Tap to cycle options (Mock)</Text>
+    </View>
   );
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <FontAwesome5 name="arrow-left" size={20} color={Colors.text} />
+          <FontAwesome5 name="arrow-left" size={20} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Reqst Part</Text>
+        <Text style={styles.headerTitle}>Part Request</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView style={styles.content}>
-        <Card style={styles.section}>
-          <Text style={styles.label}>Part *</Text>
-          <View style={styles.inputDisabled}>
-            <Text style={[styles.inputText, !partName && styles.placeholder]}>
-              {partName || 'Select a part from catalog'}
-            </Text>
-            {/* If not pre-selected, could add a picker here, but for now we enforce catalog selection */}
-          </View>
-          {!partName && (
-             <Text style={styles.helperText}>Go back to Catalog to select a part</Text>
-          )}
+        <Card style={styles.infoCard}>
+            <View style={styles.infoHeader}>
+                 <FontAwesome5 name="info-circle" size={16} color={Colors.primary} />
+                 <Text style={styles.infoTitle}>Part Information</Text>
+            </View>
+            <Text style={styles.partNameLg}>{partName || 'Select Part'}</Text>
+            <Text style={styles.partId}>Part ID: {partId || 'N/A'}</Text>
+        </Card>
 
-          <Text style={styles.label}>Quantity *</Text>
-          <View style={styles.quantityRow}>
-            <TouchableOpacity 
-              style={styles.qtyButton}
-              onPress={() => {
-                const val = parseInt(quantity) || 0;
-                if (val > 1) setQuantity((val - 1).toString());
-              }}
-            >
-              <FontAwesome5 name="minus" size={16} color={Colors.text} />
-            </TouchableOpacity>
+        <Card style={styles.section}>
+          <Text style={styles.sectionTitle}>Request Details</Text>
+          
+          <Dropdown 
+            label="Site" 
+            value={site} 
+            options={sites} 
+            onSelect={setSite} 
+          />
+
+          <Dropdown 
+            label="Equipment Affected" 
+            value={equipment} 
+            options={equipments} 
+            onSelect={setEquipment} 
+          />
+
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>Quantity <Text style={styles.required}>*</Text></Text>
             <TextInput
-              style={styles.qtyInput}
-              value={quantity}
-              onChangeText={setQuantity}
-              keyboardType="number-pad"
-              textAlign="center"
+                style={styles.input}
+                value={quantity}
+                onChangeText={setQuantity}
+                keyboardType="numeric"
+                placeholder="1"
             />
-            <TouchableOpacity 
-              style={styles.qtyButton}
-              onPress={() => {
-                const val = parseInt(quantity) || 0;
-                setQuantity((val + 1).toString());
-              }}
-            >
-              <FontAwesome5 name="plus" size={16} color={Colors.text} />
-            </TouchableOpacity>
+          </View>
+
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>Urgency Level <Text style={styles.required}>*</Text></Text>
+            <View style={styles.urgencyContainer}>
+                {(['low', 'medium', 'high', 'critical'] as const).map((level) => (
+                    <TouchableOpacity
+                        key={level}
+                        style={[
+                            styles.urgencyChip,
+                            urgency === level && styles.urgencyChipActive,
+                             urgency === level && { borderColor: level === 'critical' ? Colors.danger : Colors.primary }
+                        ]}
+                        onPress={() => setUrgency(level)}
+                    >
+                        <Text style={[
+                            styles.urgencyText,
+                            urgency === level && { color: level === 'critical' ? Colors.danger : Colors.primary }
+                        ]}>
+                            {level.charAt(0).toUpperCase() + level.slice(1)}
+                        </Text>
+                    </TouchableOpacity>
+                ))}
+            </View>
+          </View>
+
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>Issue Description <Text style={styles.required}>*</Text></Text>
+            <TextInput
+                style={[styles.input, styles.textArea]}
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                numberOfLines={4}
+                placeholder="Describe the issue and why this part is needed..."
+            />
           </View>
         </Card>
 
         <Card style={styles.section}>
-          <Text style={styles.label}>Urgency *</Text>
-          <View style={styles.urgencyGroup}>
-            <UrgencyOption value="low" label="Low" color={Colors.success} />
-            <UrgencyOption value="medium" label="Medium" color={Colors.primary} />
-            <UrgencyOption value="high" label="High" color={Colors.warning} />
-            <UrgencyOption value="critical" label="Critical" color={Colors.danger} />
-          </View>
+            <Text style={styles.sectionTitle}>Photos of Issue <Text style={styles.required}>*</Text></Text>
+            <Text style={styles.helperText}>Upload photos showing the faulty part/issue</Text>
+            
+            <View style={styles.photoRow}>
+                <TouchableOpacity style={styles.photoButton}>
+                    <FontAwesome5 name="camera" size={16} color={Colors.textSecondary} />
+                    <Text style={styles.photoButtonText}>Camera</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.photoButton}>
+                     <FontAwesome5 name="upload" size={16} color={Colors.textSecondary} />
+                     <Text style={styles.photoButtonText}>Upload</Text>
+                </TouchableOpacity>
+            </View>
         </Card>
 
-        <Card style={styles.section}>
-          <Text style={styles.label}>Site (Optional)</Text>
-          <TextInput
-            style={styles.input}
-            value={site}
-            onChangeText={setSite}
-            placeholder="e.g. SITE-123"
-            placeholderTextColor={Colors.textSecondary}
-          />
-
-          <Text style={styles.label}>Notes</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Reason for request, special instructions..."
-            placeholderTextColor={Colors.textSecondary}
-            multiline
-            numberOfLines={3}
-          />
-        </Card>
+        <Button 
+            title={loading ? "Submitting..." : "Submit Request"} 
+            onPress={handleSubmit} 
+            disabled={loading}
+            style={styles.submitButton}
+        />
+        <View style={{ height: 40 }} />
       </ScrollView>
-
-      <View style={styles.footer}>
-        <Button
-            onPress={handleSubmit}
-            loading={loading}
-            disabled={loading || !partId}
-        >
-            Submit Request
-        </Button>
-      </View>
     </SafeAreaView>
   );
 }
@@ -185,130 +210,151 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
+    backgroundColor: Colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  backButton: {
-    padding: 8,
+    padding: 16,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.text,
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  backButton: {
+    padding: 4,
   },
   content: {
+    flex: 1,
     padding: 16,
+  },
+  infoCard: {
+    marginBottom: 16,
+    backgroundColor: '#EFF6FF', // Light blue
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  infoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  infoTitle: {
+    color: Colors.primary,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  partNameLg: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  partId: {
+    color: Colors.textSecondary,
+    fontSize: 13,
   },
   section: {
     marginBottom: 16,
     padding: 16,
   },
-  label: {
-    fontSize: 14,
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: '600',
     color: Colors.text,
+    marginBottom: 16,
+  },
+  fieldContainer: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.text,
     marginBottom: 8,
-    marginTop: 12,
+  },
+  required: {
+    color: Colors.danger,
   },
   input: {
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 8,
     padding: 12,
-    fontSize: 16,
+    fontSize: 14,
     color: Colors.text,
-    backgroundColor: Colors.background,
+    backgroundColor: '#fff',
   },
-  inputDisabled: {
+  pickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 8,
     padding: 12,
-    backgroundColor: Colors.background + '80', // Slightly transparent
+    backgroundColor: '#fff',
   },
   inputText: {
-    fontSize: 16,
     color: Colors.text,
   },
   placeholder: {
     color: Colors.textSecondary,
-    fontStyle: 'italic',
+  },
+  urgencyContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  urgencyChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: '#fff',
+  },
+  urgencyChipActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: Colors.primary,
+  },
+  urgencyText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
   },
   helperText: {
     fontSize: 12,
-    color: Colors.danger,
-    marginTop: 4,
+    color: Colors.textSecondary,
+    marginBottom: 12,
   },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  quantityRow: {
+  photoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 12,
   },
-  qtyButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.background,
-  },
-  qtyInput: {
+  photoButton: {
     flex: 1,
-    height: 44,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 8,
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.text,
-    backgroundColor: Colors.background,
-  },
-  urgencyGroup: {
-    gap: 12,
-  },
-  urgencyOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 8,
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: Colors.border,
-  },
-  urgencyText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
-  radio: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: Colors.textSecondary,
-    marginRight: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  footer: {
+    borderRadius: 8,
     padding: 16,
-    backgroundColor: Colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderStyle: 'dashed',
+    backgroundColor: '#F9FAFB',
   },
+  photoButtonText: {
+    marginLeft: 8,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  submitButton: {
+    marginBottom: 20,
+  }
 });
