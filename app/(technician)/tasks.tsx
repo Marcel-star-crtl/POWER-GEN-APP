@@ -1,97 +1,173 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { api } from '../../services/api';
-import { ApiResponse } from '../../types/common.types';
-import { Maintenance } from '../../types/maintenance.types';
+import { router, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
-import { FontAwesome5 } from '@expo/vector-icons';
-import { format } from 'date-fns';
+import { api } from '../../services/api';
+import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
 
-export default function TasksList() {
-  const [tasks, setTasks] = useState<Maintenance[]>([]);
-  const [loading, setLoading] = useState(true);
+// Define Task Interface
+interface TaskItem {
+  id: string; // maintenanceId or composite key
+  siteId: string;
+  siteName: string; // might need to fetch or cache
+  type: string; // 'Preventive' | 'Corrective' etc.
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Pending';
+  date: string;
+  checkCount?: number;
+}
+
+export default function Tasks() {
+  const [activeTab, setActiveTab] = useState<'drafts' | 'submitted'>('submitted');
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Filter state could be added here (pending vs completed, etc)
-
-  const fetchTasks = async () => {
+  const fetchTasks = useCallback(async () => {
+    setLoading(true);
     try {
-      // Fetch technician tasks (unified tasks/visits)
-      const response = await api.get<ApiResponse<Maintenance[]>>('/technician/maintenance/tasks');
-      if (response.data.data) {
-        setTasks(response.data.data);
+      const allDrafts: TaskItem[] = [];
+
+      // 1. Fetch Drafts from AsyncStorage
+      const keys = await AsyncStorage.getAllKeys();
+      const draftKeys = keys.filter(k => k.startsWith('draft_'));
+      
+      // Group drafts by maintenanceId/siteId
+      // Key format: draft_${type}_${siteId}_${maintenanceId}
+      const draftGroups: {[key: string]: {siteId: string, maintenanceId: string, types: Set<string>}} = {};
+      
+      for (const key of draftKeys) {
+        const parts = key.split('_'); 
+        // parts[0] = draft
+        // parts[1] = type (generator, cleaning, etc.)
+        // parts[2] = siteId
+        // parts[3] = maintenanceId (or 'adhoc')
+        
+        if (parts.length >= 4) {
+            const type = parts[1];
+            const siteId = parts[2];
+            const maintenanceId = parts[3];
+            const groupKey = `${siteId}_${maintenanceId}`;
+            
+            if (!draftGroups[groupKey]) {
+                draftGroups[groupKey] = { siteId, maintenanceId, types: new Set() };
+            }
+            draftGroups[groupKey].types.add(type);
+        }
       }
-    } catch (error) {
-      console.error('Failed to fetch tasks:', error);
+
+      // Convert groups to TaskItems
+      Object.values(draftGroups).forEach(group => {
+           allDrafts.push({
+               id: group.maintenanceId,
+               siteId: group.siteId,
+               siteName: `Site ${group.siteId}`, // Placeholder
+               type: 'Preventive', // Infer or generic
+               status: 'Draft',
+               date: new Date().toISOString(), 
+               checkCount: group.types.size
+           });
+      });
+
+      // 2. Fetch Submitted from API
+      if (activeTab === 'submitted') {
+          try {
+             // Reusing the endpoint from original tasks.tsx but assuming it returns user tasks
+             const response = await api.get('/technician/maintenance/assigned?status=completed,pending_approval,approved,rejected');
+             if (response.data.data) {
+                 const serverTasks = response.data.data.map((m: any) => ({
+                     id: m.maintenance_id,
+                     siteId: m.site_id,
+                     siteName: m.site_name || `Site ${m.site_id}`,
+                     type: m.type || 'Maintenance',
+                     status: m.status === 'pending_approval' ? 'Pending' : (m.status === 'completed' ? 'Submitted' : (m.status.charAt(0).toUpperCase() + m.status.slice(1))), // Map to UI status
+                     date: m.scheduled_date || m.created_at,
+                     checkCount: 0 
+                 }));
+                 setTasks(serverTasks);
+             } else {
+                 setTasks([]);
+             }
+          } catch (e) {
+              console.error('Fetch server tasks failed', e);
+          }
+      } else {
+          // If drafts tab, show drafts
+          setTasks(allDrafts);
+      }
+
+    } catch (e) {
+      console.error('Error loading tasks', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [activeTab]);
 
-  useEffect(() => {
-    fetchTasks();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchTasks();
+    }, [fetchTasks])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchTasks();
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'approved': return Colors.success;
-      case 'completed': return Colors.success;
-      case 'rejected': return Colors.danger;
-      case 'pending_approval': return Colors.warning;
-      case 'in_progress': return Colors.primary;
-      case 'scheduled': return '#6366f1'; // indigo
-      default: return Colors.textSecondary;
-    }
+  const handlePressTask = (task: TaskItem) => {
+      if (task.status === 'Draft') {
+          // Open Checklist in Draft Mode
+          router.push({
+              pathname: '/(technician)/maintenance/checklist',
+              params: { siteId: task.siteId, siteName: task.siteName, type: 'preventive', maintenanceId: task.id === 'adhoc' ? '' : task.id }
+          });
+      } else {
+          // Open Submitted View (Read Only or Status)
+          // Could reuse checklist with a 'readOnly' param or similar
+           router.push({
+              pathname: '/(technician)/maintenance/checklist',
+              params: { siteId: task.siteId, siteName: task.siteName, type: 'preventive', maintenanceId: task.id, readOnly: 'true' }
+          });
+      }
   };
 
-  const handleTaskPress = (task: Maintenance) => {
-    console.log('Navigating to task detail:', task._id);
-    router.push({
-      pathname: '/(technician)/task-detail',
-      params: { id: task._id },
-    });
-  };
-
-  const renderItem = ({ item }: { item: Maintenance }) => (
-    <TouchableOpacity onPress={() => handleTaskPress(item)}>
-      <Card style={styles.taskCard}>
+  const renderItem = ({ item }: { item: TaskItem }) => (
+    <TouchableOpacity onPress={() => handlePressTask(item)}>
+      <Card style={styles.card}>
         <View style={styles.cardHeader}>
-          <View style={styles.siteInfo}>
-            <Text style={styles.siteName}>{item.site_details?.Site_Name || item.site_name || item.site_id}</Text>
-            <Text style={styles.siteRegion}>{item.site_details?.Region || 'Unknown Region'}</Text>
+          <View style={styles.headerLeft}>
+             <View style={[styles.iconContainer, { backgroundColor: item.status === 'Draft' ? Colors.warning + '20' : Colors.success + '20' }]}>
+                <FontAwesome5 
+                    name={item.status === 'Draft' ? 'edit' : 'check-circle'} 
+                    size={16} 
+                    color={item.status === 'Draft' ? Colors.warning : Colors.success} 
+                />
+             </View>
+             <View>
+                 <Text style={styles.siteName}>{item.siteName}</Text>
+                 <Text style={styles.taskType}>{item.type}</Text>
+             </View>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-             <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-               {item.status.replace('_', ' ').toUpperCase()}
-             </Text>
+          <View style={[styles.statusBadge, { 
+              backgroundColor: item.status === 'Draft' ? Colors.warning : 
+                             item.status === 'Approved' ? Colors.success : 
+                             item.status === 'Rejected' ? Colors.error : Colors.primary 
+          }]}>
+             <Text style={styles.statusText}>{item.status}</Text>
           </View>
         </View>
-
-        <View style={styles.cardBody}>
-          <View style={styles.infoRow}>
-            <FontAwesome5 name="tools" size={14} color={Colors.textSecondary} style={{ width: 20 }} />
-            <Text style={styles.infoText}>{item.visit_type}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <FontAwesome5 name="calendar-alt" size={14} color={Colors.textSecondary} style={{ width: 20 }} />
-            <Text style={styles.infoText}>
-               {item.scheduled_date ? format(new Date(item.scheduled_date), 'MMM dd, yyyy') : 
-                item.visit_date ? format(new Date(item.visit_date), 'MMM dd, yyyy') : 'No Date'}
-            </Text>
-          </View>
-          <View style={styles.tapHint}>
-            <Text style={styles.tapHintText}>Tap to view details</Text>
-            <FontAwesome5 name="chevron-right" size={12} color={Colors.textSecondary} />
-          </View>
+        
+        <View style={styles.cardFooter}>
+             <Text style={styles.dateText}>
+                 <FontAwesome5 name="calendar-alt" size={12} /> {new Date(item.date).toLocaleDateString()}
+             </Text>
+             {item.status === 'Draft' && (
+                 <Text style={styles.draftInfo}>{item.checkCount} checks started</Text>
+             )}
         </View>
       </Card>
     </TouchableOpacity>
@@ -99,27 +175,42 @@ export default function TasksList() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <LoadingOverlay visible={loading && !refreshing} />
+      
       <View style={styles.header}>
         <Text style={styles.title}>My Tasks</Text>
       </View>
 
-      {loading && !refreshing ? (
-        <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 20 }} />
-      ) : (
-        <FlatList
-          data={tasks}
-          renderItem={renderItem}
-          keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.listContent}
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No tasks found</Text>
+      <View style={styles.tabs}>
+        <TouchableOpacity 
+            style={[styles.tab, activeTab === 'submitted' && styles.activeTab]}
+            onPress={() => setActiveTab('submitted')}
+        >
+            <Text style={[styles.tabText, activeTab === 'submitted' && styles.activeTabText]}>Submitted</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+            style={[styles.tab, activeTab === 'drafts' && styles.activeTab]}
+            onPress={() => setActiveTab('drafts')}
+        >
+            <Text style={[styles.tabText, activeTab === 'drafts' && styles.activeTabText]}>Drafts</Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={tasks}
+        renderItem={renderItem}
+        keyExtractor={item => `${item.id}_${item.status}`}
+        contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
+          !loading ? (
+            <View style={styles.empty}>
+              <FontAwesome5 name="clipboard-list" size={48} color={Colors.textSecondary} />
+              <Text style={styles.emptyText}>No {activeTab} tasks found</Text>
             </View>
-          }
-        />
-      )}
+          ) : null
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -132,19 +223,48 @@ const styles = StyleSheet.create({
   header: {
     padding: 16,
     backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: Colors.text,
   },
-  listContent: {
+  tabs: {
+    flexDirection: 'row',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  tab: {
+    marginRight: 24,
+    paddingBottom: 8,
+  },
+  activeTab: {
+    borderBottomWidth: 2,
+    borderBottomColor: Colors.primary,
+  },
+  tabText: {
+    fontSize: 16,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  activeTabText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  list: {
     padding: 16,
   },
-  taskCard: {
+  card: {
     marginBottom: 12,
+    padding: 16,
+    backgroundColor: Colors.surface,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1, 
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    borderRadius: 8
   },
   cardHeader: {
     flexDirection: 'row',
@@ -152,61 +272,63 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 12,
   },
-  siteInfo: {
-    flex: 1,
+  headerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+  },
+  iconContainer: {
+     width: 32,
+     height: 32,
+     borderRadius: 16,
+     alignItems: 'center',
+     justifyContent: 'center',
+     marginRight: 12,
   },
   siteName: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: Colors.text,
-    marginBottom: 4,
   },
-  siteRegion: {
-    fontSize: 14,
+  taskType: {
+    fontSize: 13,
     color: Colors.textSecondary,
   },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    marginLeft: 8,
   },
   statusText: {
-    fontSize: 10,
-    fontWeight: 'bold',
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'white',
+    textTransform: 'uppercase',
   },
-  cardBody: {
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
-    paddingTop: 12,
   },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  infoText: {
-    fontSize: 14,
-    color: Colors.text,
-  },
-  tapHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: 8,
-    gap: 4,
-  },
-  tapHintText: {
+  dateText: {
     fontSize: 12,
     color: Colors.textSecondary,
-    fontStyle: 'italic',
   },
-  emptyState: {
-    padding: 24,
+  draftInfo: {
+      fontSize: 12,
+      color: Colors.warning,
+      fontWeight: '500', 
+  },
+  empty: {
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: 48,
   },
   emptyText: {
-    fontSize: 16,
+    marginTop: 16,
     color: Colors.textSecondary,
-  },
+    fontSize: 16,
+  }
 });

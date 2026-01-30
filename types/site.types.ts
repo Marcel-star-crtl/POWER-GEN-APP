@@ -1,3 +1,5 @@
+import { Generator } from './generator.types';
+
 export interface Site {
     _id: string;
     Site_Name: string;
@@ -12,9 +14,17 @@ export interface Site {
     Sites_Type?: string;
     Latitude?: number;
     Longitude?: number;
-    Current_Generators?: any[];
+    Current_Generators?: Generator[];
     // Computed fields for UI
     status?: 'scheduled' | 'overdue' | 'completed' | 'in_progress' | 'pending';
     visit_date?: string | Date; // Mapped from Actual_Date_Visit or computed
+    next_maintenance?: {
+      maintenance_id: string;
+      date: string | Date;
+      type: string;
+      priority: string;
+    };
+    days_since_last_visit?: number;
+    needs_visit?: boolean;
   }
   

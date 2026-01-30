@@ -84,13 +84,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string, password: string) => {
-    console.log('🔐 SignIn started for:', email);
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    // Passwords typically should be treated verbatim, but copy/paste often adds
+    // trailing whitespace/newlines that cause confusing "Invalid credentials".
+    const normalizedPassword = (password || '').replace(/\u00A0/g, ' ').trim();
+
+    console.log('🔐 SignIn started for:', normalizedEmail);
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
       console.log('📡 Sending login request...');
       const response = await api.post<ApiResponse<{ accessToken: string; refreshToken?: string; user: User }>>('/auth/login', {
-        email,
-        password,
+        email: normalizedEmail,
+        password: normalizedPassword,
       });
 
       console.log('✅ Login response received:', response.data);

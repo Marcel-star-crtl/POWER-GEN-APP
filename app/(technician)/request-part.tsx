@@ -25,39 +25,35 @@ export default function RequestPartScreen() {
   const [partId, setPartId] = useState(params.partId || '');
   const [partName, setPartName] = useState(params.partName || '');
   
-  // New Fields
-  const [site, setSite] = useState('');
-  const [equipment, setEquipment] = useState('');
+  // New Fields (simplified)
   const [quantity, setQuantity] = useState('1');
-  const [urgency, setUrgency] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
+  const [requestedTime, setRequestedTime] = useState('');
   const [description, setDescription] = useState('');
-
-  // Mock Data for Dropdowns
-  const sites = ['Site A - Lagos', 'Site B - Abuja', 'Site C - Kano']; 
-  const equipments = ['Generator #1', 'Generator #2', 'Cooling System', 'Control Panel'];
 
   const handleSubmit = async () => {
     if (!partId) {
       Alert.alert('Error', 'Please select a part');
       return;
     }
-    if (!site || !equipment || !quantity || !description) {
-      Alert.alert('Error', 'Please fill in all required fields');
+    if (!quantity || !description) {
+      Alert.alert('Error', 'Please provide quantity and reason');
       return;
     }
 
     try {
       setLoading(true);
-      const payload = {
+      const payload: any = {
         items: [{
           part: partId,
-          part_name: partName, // helpful for backend if not joining
-          quantity: parseInt(quantity)
+          part_name: partName,
+          quantity: parseInt(quantity, 10)
         }],
-        site_name: site,
-        urgency,
-        notes: `Equipment: ${equipment}\nIssue: ${description}`, // Mapping to existing backend notes field
+        notes: description,
       };
+
+      if (requestedTime) {
+        payload.requested_time = requestedTime;
+      }
 
       await api.post('/parts/requests', payload);
 
@@ -113,20 +109,6 @@ export default function RequestPartScreen() {
 
         <Card style={styles.section}>
           <Text style={styles.sectionTitle}>Request Details</Text>
-          
-          <Dropdown 
-            label="Site" 
-            value={site} 
-            options={sites} 
-            onSelect={setSite} 
-          />
-
-          <Dropdown 
-            label="Equipment Affected" 
-            value={equipment} 
-            options={equipments} 
-            onSelect={setEquipment} 
-          />
 
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Quantity <Text style={styles.required}>*</Text></Text>
@@ -140,57 +122,29 @@ export default function RequestPartScreen() {
           </View>
 
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Urgency Level <Text style={styles.required}>*</Text></Text>
-            <View style={styles.urgencyContainer}>
-                {(['low', 'medium', 'high', 'critical'] as const).map((level) => (
-                    <TouchableOpacity
-                        key={level}
-                        style={[
-                            styles.urgencyChip,
-                            urgency === level && styles.urgencyChipActive,
-                             urgency === level && { borderColor: level === 'critical' ? Colors.danger : Colors.primary }
-                        ]}
-                        onPress={() => setUrgency(level)}
-                    >
-                        <Text style={[
-                            styles.urgencyText,
-                            urgency === level && { color: level === 'critical' ? Colors.danger : Colors.primary }
-                        ]}>
-                            {level.charAt(0).toUpperCase() + level.slice(1)}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
+            <Text style={styles.label}>Requested Time (optional)</Text>
+            <TextInput
+                style={styles.input}
+                value={requestedTime}
+                onChangeText={setRequestedTime}
+                placeholder="YYYY-MM-DD HH:MM"
+            />
           </View>
 
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Issue Description <Text style={styles.required}>*</Text></Text>
+            <Text style={styles.label}>Reason <Text style={styles.required}>*</Text></Text>
             <TextInput
                 style={[styles.input, styles.textArea]}
                 value={description}
                 onChangeText={setDescription}
                 multiline
                 numberOfLines={4}
-                placeholder="Describe the issue and why this part is needed..."
+                placeholder="Explain why this part is needed..."
             />
           </View>
         </Card>
 
-        <Card style={styles.section}>
-            <Text style={styles.sectionTitle}>Photos of Issue <Text style={styles.required}>*</Text></Text>
-            <Text style={styles.helperText}>Upload photos showing the faulty part/issue</Text>
-            
-            <View style={styles.photoRow}>
-                <TouchableOpacity style={styles.photoButton}>
-                    <FontAwesome5 name="camera" size={16} color={Colors.textSecondary} />
-                    <Text style={styles.photoButtonText}>Camera</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.photoButton}>
-                     <FontAwesome5 name="upload" size={16} color={Colors.textSecondary} />
-                     <Text style={styles.photoButtonText}>Upload</Text>
-                </TouchableOpacity>
-            </View>
-        </Card>
+        {/* Photos removed - simplified form */}
 
         <Button 
             title={loading ? "Submitting..." : "Submit Request"} 

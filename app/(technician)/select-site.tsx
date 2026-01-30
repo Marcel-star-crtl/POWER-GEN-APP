@@ -1,18 +1,26 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { api } from '../../services/api';
+import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
 
 interface SiteItem {
   IHS_ID_SITE: string;
   Site_Name: string;
+  next_maintenance?: {
+    maintenance_id: string;
+    date: string | Date;
+    type: string;
+    priority: string;
+  };
 }
 
 export default function SelectSite() {
+  const params = useLocalSearchParams<{ nextPath?: string; requiredAction?: string }>();
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
@@ -35,27 +43,80 @@ export default function SelectSite() {
   }, []);
 
   const filteredSites = useMemo(() => {
+    let result = sites;
+    
+    // Filter by required action if present
+    if (params.requiredAction) {
+       const reqAction = params.requiredAction!.toLowerCase().trim();
+       
+       result = result.filter(s => {
+          if (!s.next_maintenance?.type) return false;
+          
+          const type = s.next_maintenance.type.toUpperCase();
+          
+          if (reqAction === 'preventive') {
+              return type.includes('PM');
+          } else if (reqAction === 'refueling') {
+              return type.includes('RF');
+          } else if (reqAction === 'corrective') {
+              return type.includes('END');
+          }
+          
+          return false;
+       });
+    }
+
     const q = query.trim().toLowerCase();
-    if (!q) return sites;
-    return sites.filter(s =>
+    if (!q) return result;
+    
+    return result.filter(s =>
       s.Site_Name?.toLowerCase().includes(q) || s.IHS_ID_SITE?.toLowerCase().includes(q)
     );
-  }, [sites, query]);
+  }, [sites, query, params.requiredAction]);
 
   const handleSelect = (site: SiteItem) => {
-    console.log('🏢 Selected site:', site.Site_Name, site.IHS_ID_SITE);
-    const target = `/(technician)/create-visit?siteId=${encodeURIComponent(site.IHS_ID_SITE)}&siteName=${encodeURIComponent(site.Site_Name)}`;
-    console.log('🗺 Target URL:', target);
-    router.replace(target);
+    console.log('🏢 Selected site:', site.Site_Name, site.IHS_ID_SITE, 'Maintenance ID:', site.next_maintenance?.maintenance_id);
+    
+    const maintenanceId = site.next_maintenance?.maintenance_id || '';
+    
+    if (params.nextPath) {
+        // Construct the next URL with site params
+        // Decode nextPath in case it was encoded
+        const basePath = decodeURIComponent(params.nextPath);
+        const separator = basePath.includes('?') ? '&' : '?';
+        let target = `${basePath}${separator}siteId=${encodeURIComponent(site.IHS_ID_SITE)}&siteName=${encodeURIComponent(site.Site_Name)}`;
+        if (maintenanceId) {
+          target += `&maintenanceId=${encodeURIComponent(maintenanceId)}`;
+        }
+        console.log('🔗 Redirecting to:', target);
+        router.push(target);
+    } else {
+        // If coming from quick action
+        const reqAction = params.requiredAction || 'preventive';
+        
+        // Navigate to Checklist screen
+        let target = `/(technician)/maintenance/checklist?siteId=${encodeURIComponent(site.IHS_ID_SITE)}&siteName=${encodeURIComponent(site.Site_Name)}&type=${reqAction}`;
+        
+        if (maintenanceId) {
+           target += `&maintenanceId=${encodeURIComponent(maintenanceId)}`;
+        }
+        
+        console.log('🔗 Redirecting to CheckList:', target);
+        router.push(target);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <LoadingOverlay visible={loading} />
+      
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <FontAwesome5 name="arrow-left" size={20} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Select Site</Text>
+        <Text style={styles.headerTitle}>
+           {params.requiredAction ? `Select Site` : 'Select Site'}
+        </Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -69,13 +130,9 @@ export default function SelectSite() {
         />
       </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 24 }} />
-      ) : (
         <ScrollView contentContainerStyle={filteredSites.length === 0 ? styles.emptyContainer : undefined}>
-            {console.log(filteredSites)}
-          {filteredSites.length === 0 ? (
-            <Text style={styles.emptyText}>No sites found</Text>
+          {filteredSites.length === 0 && !loading ? (
+            <Text style={styles.emptyText}>No assigned sites found for this action.</Text>
           ) : (
             filteredSites.map((item) => (
               <TouchableOpacity key={item.IHS_ID_SITE} onPress={() => handleSelect(item)}>
@@ -85,12 +142,18 @@ export default function SelectSite() {
                     <FontAwesome5 name="chevron-right" size={16} color={Colors.textSecondary} />
                   </View>
                   <Text style={styles.siteId}>{item.IHS_ID_SITE}</Text>
+                  {item.next_maintenance?.type && (
+                      <View style={{marginTop: 8, flexDirection: 'row'}}>
+                          <Text style={{fontSize: 12, color: Colors.primary, backgroundColor: Colors.primary + '20', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4}}>
+                              {item.next_maintenance.type}
+                          </Text>
+                      </View>
+                  )}
                 </Card>
               </TouchableOpacity>
             ))
           )}
         </ScrollView>
-      )}
     </SafeAreaView>
   );
 }
@@ -116,9 +179,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    // Note: removed backgroundColor/borderWidth to match design if needed, but kept for clarity
   },
   headerTitle: {
     fontSize: 18,

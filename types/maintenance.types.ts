@@ -115,6 +115,8 @@ export interface Maintenance {
   site_name?: string;
   visit_reference: string; // Generated when visit is submitted
   
+  equipment_checks?: any; // Detailed checklists
+  
   // Assignment Details (Task phase)
   scheduled_date?: Date; // When task is scheduled
   assigned_date?: Date;

@@ -8,7 +8,8 @@ import { api } from '../../services/api';
 import { ApiResponse } from '../../types/common.types';
 import { router } from 'expo-router';
 import { SummaryCard } from '../../components/SummaryCard';
-import { ActivityCard } from '../../components/ActivityCard';
+import { QuickActionCard } from '../../components/QuickActionCard';
+import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
 
  interface DashboardStats {
   pendingTasks: number;
@@ -16,6 +17,17 @@ import { ActivityCard } from '../../components/ActivityCard';
   inProgressTasks: number;
   completedThisMonth: number;
   totalCompleted: number;
+  actionCounts?: {
+    generator: number;
+    fuel_refill: number;
+    cleaning: number;
+    power_cabinet: number;
+    grid: number;
+    shelter: number;
+    preventive?: number;
+    corrective?: number;
+    refueling?: number;
+  };
 }
 
 export default function Dashboard() {
@@ -26,22 +38,32 @@ export default function Dashboard() {
 
   const fetchDashboard = async () => {
     try {
-      console.log('📊 Fetching dashboard...');
+      // Short preview of logic - kept original logic
       const token = await AsyncStorage.getItem('accessToken');
-      console.log('🔑 Token exists:', !!token);
-      if (token) {
-        console.log('🔑 Token preview:', token.substring(0, 20) + '...');
-      }
-      
       const response = await api.get<ApiResponse<DashboardStats>>('/technician/dashboard/me');
-      console.log('✅ Dashboard response:', response.data);
+      console.log('📊 Dashboard Response:', JSON.stringify(response.data, null, 2));
       if (response.data.data) {
-        setStats(response.data.data);
+        // Calculate aggregations if backend doesn't provide them yet
+        const data = response.data.data;
+        if (data.actionCounts) {
+           const counts = data.actionCounts;
+           // Aggregate for Preventive if not present
+           if (counts.preventive === undefined) {
+             counts.preventive = (counts.generator || 0) + (counts.cleaning || 0) + (counts.power_cabinet || 0) + (counts.grid || 0) + (counts.shelter || 0);
+           }
+           // Use raw fuel_refill for refueling if not present
+           if (counts.refueling === undefined) {
+             counts.refueling = counts.fuel_refill || 0;
+           }
+           // Corrective is pending - use 0 or some other metric if available, for now 0 is safe
+           if (counts.corrective === undefined) {
+             counts.corrective = 0; // Needs backend support
+           }
+        }
+        setStats(data);
       }
     } catch (error: any) {
-      console.error('❌ Failed to fetch dashboard:', error);
-      console.error('❌ Error response:', error.response?.data);
-      console.error('❌ Error status:', error.response?.status);
+      console.error('Fetch dashboard error', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -65,8 +87,22 @@ export default function Dashboard() {
     fetchDashboard();
   };
 
+  const navigateToSiteSelection = (type: string) => {
+    // Corrective maintenance goes directly to parts (no assignment required)
+    if (type === 'corrective') {
+      router.push({ pathname: '/(technician)/parts' });
+      return;
+    }
+
+    router.push({
+      pathname: '/(technician)/select-site',
+      params: { requiredAction: type }
+    });
+  };
+
   return (
     <SafeAreaView style={styles.container}>
+       <LoadingOverlay visible={loading} />
        <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -105,40 +141,40 @@ export default function Dashboard() {
           />
         </View>
 
-        {/* Activity Section */}
+        {/* Quick Actions Section (Updated) */}
         <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Select Activity</Text>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
         </View>
         
-        <View style={styles.activityList}>
-            <ActivityCard 
-                title="Preventive Maintenance" 
-                subtitle="Routine checks and service schedules"
-                iconName="tools" 
-                iconColor={Colors.primary}
-                onPress={() => router.push('/(technician)/maintenance')} 
+        <View style={styles.actionsContainer}>
+          <QuickActionCard
+            title="PREVENTIVE MAINTENANCE"
+            subtitle="Scheduled Checks"
+            badgeText={stats?.actionCounts?.preventive ? `${stats.actionCounts.preventive} Assigned` : "0 Assigned"}
+            icon="clipboard-check"
+            color={Colors.primary}
+            onPress={() => navigateToSiteSelection('preventive')}
+          />
+          {/* Refueling quick-action temporarily disabled per request */}
+          {false && (
+            <QuickActionCard
+              title="REFUELING MANAGEMENT"
+              subtitle="Fuel Log & Tank Level"
+              badgeText={stats?.actionCounts?.refueling ? `${stats.actionCounts.refueling} Assigned` : "0 Assigned"}
+              icon="water"
+              color={Colors.warning}
+              onPress={() => navigateToSiteSelection('refueling')}
             />
-            <ActivityCard 
-                title="Corrective Maintenance" 
-                subtitle="Report and fix unexpected issues"
-                iconName="wrench" 
-                iconColor={Colors.warning}
-                onPress={() => router.push('/(technician)/parts')} 
-            />
-            <ActivityCard 
-                title="Refueling Management" 
-                subtitle="Log fuel levels and requests"
-                iconName="gas-pump" 
-                iconColor={Colors.secondary}
-                onPress={() => router.push('/(technician)/refueling')} 
-            />
-            <ActivityCard 
-                title="Parts Request" 
-                subtitle="Order new parts and inventory"
-                iconName="cogs" 
-                iconColor={Colors.secondary}
-                onPress={() => router.push('/(technician)/parts')} 
-            />
+          )}
+           <QuickActionCard
+            title="CORRECTIVE MAINTENANCE"
+            subtitle="Repairs & Issues"
+            badgeText={stats?.actionCounts?.corrective ? `${stats.actionCounts.corrective} Assigned` : "0 Assigned"}
+            icon="construct"
+            color={Colors.error}
+            onPress={() => navigateToSiteSelection('corrective')}
+          />
+
         </View>
 
       </ScrollView>
@@ -185,7 +221,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 32,
   },
-  activityList: {
-    gap: 4
+  actionsContainer: {
+    marginBottom: 24,
   }
 });

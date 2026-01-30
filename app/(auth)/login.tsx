@@ -46,8 +46,8 @@ export default function Login() {
           )}
 
           <Input
-            label="Email Address"
-            placeholder="technician@powergen.com"
+            label="Email or Phone"
+            placeholder="technician@powergen.com / 080..."
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"

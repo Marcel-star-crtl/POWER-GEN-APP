@@ -6,7 +6,8 @@ import {
   StyleSheet, 
   ScrollView, 
   TouchableOpacity, 
-  Alert
+  Alert,
+  ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -15,6 +16,8 @@ import { api } from '../../../services/api';
 import { ApiResponse } from '../../../types/common.types';
 import { Maintenance } from '../../../types/maintenance.types';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 
 type InspectionItem = {
     id: string;
@@ -38,53 +41,161 @@ export default function MaintenanceChecklist() {
   const router = useRouter();
   const [task, setTask] = useState<Maintenance | null>(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   
   // Local state to track progress for this session
   const [inspections, setInspections] = useState<InspectionItem[]>(INITIAL_INSPECTIONS);
 
-  useEffect(() => {
-    const fetchTaskDetails = async () => {
-        try {
-          const response = await api.get<ApiResponse<Maintenance>>(`/maintenance/${id}`);
-          if (response.data.data) {
-            setTask(response.data.data);
-          } else {
-             // Mock fallback
-             setTask({
-                 _id: id as string,
-                 site_name: 'Victoria Island Site A',
-                 site_id: 'VI-001',
-                 visit_date: new Date(),
-             } as any);
+  const loadTaskAndProgress = async () => {
+    if (!id) return;
+    
+    try {
+      setLoading(true);
+      const response = await api.get<ApiResponse<Maintenance>>(`/technician/maintenance/${id}`);
+      if (response.data.data) {
+        const taskData = response.data.data;
+        setTask(taskData);
+        
+        // Update inspections status
+        const updatedInspections = INITIAL_INSPECTIONS.map(item => {
+          // Check if the equipment check has actual data AND check status
+          let isCompleted = false;
+          
+          if (item.type === 'generator') {
+            const genChecks = taskData.equipment_checks?.generator_checks;
+            const hasData = Array.isArray(genChecks) && genChecks.length > 0 && genChecks[0]?.batteryStatus !== undefined;
+            const isApproved = genChecks && genChecks[0]?.status === 'approved';
+            isCompleted = hasData && (isApproved || genChecks[0]?.status === 'pending_approval');
+          } else if (item.type === 'cleaning') {
+            const cleanChecks = taskData.equipment_checks?.cleaning_checks;
+            const hasData = cleanChecks && (
+              cleanChecks.isClean !== undefined || 
+              cleanChecks.spillage !== undefined ||
+              cleanChecks.securityLight !== undefined
+            );
+            const isApproved = cleanChecks?.check_status === 'approved';
+            isCompleted = hasData && (isApproved || cleanChecks?.check_status === 'pending_approval');
+          } else if (item.type === 'grid') {
+            const gridChecks = taskData.equipment_checks?.grid_checks;
+            const hasData = gridChecks && (
+              gridChecks.gridStatus !== undefined || 
+              gridChecks.breakerStatus !== undefined
+            );
+            const isApproved = gridChecks?.check_status === 'approved';
+            isCompleted = hasData && (isApproved || gridChecks?.check_status === 'pending_approval');
+          } else if (item.type === 'shelter') {
+            const shelterChecks = taskData.equipment_checks?.shelter_checks;
+            const hasData = shelterChecks && (
+              shelterChecks.shelterStatus !== undefined ||
+              shelterChecks.doorStatus !== undefined
+            );
+            const isApproved = shelterChecks?.check_status === 'approved';
+            isCompleted = hasData && (isApproved || shelterChecks?.check_status === 'pending_approval');
+          } else if (item.type === 'fuel_tank') {
+            const fuelChecks = taskData.equipment_checks?.fuel_tank_checks;
+            const hasData = fuelChecks && (
+              fuelChecks.tankStatus !== undefined ||
+              fuelChecks.waterInTank !== undefined
+            );
+            const isApproved = fuelChecks?.check_status === 'approved';
+            isCompleted = hasData && (isApproved || fuelChecks?.check_status === 'pending_approval');
+          } else if (item.type === 'power_cabinet') {
+            const cabinetChecks = taskData.equipment_checks?.power_cabinet_checks;
+            const hasData = Array.isArray(cabinetChecks) && cabinetChecks.length > 0;
+            const isApproved = cabinetChecks && cabinetChecks[0]?.status === 'approved';
+            isCompleted = hasData && (isApproved || cabinetChecks[0]?.status === 'pending_approval');
           }
-        } catch (error) {
-           // Mock fallback on error
-           setTask({
-                _id: id as string,
-                site_name: 'Victoria Island Site A',
-                site_id: 'VI-001',
-                visit_date: new Date(),
-           } as any);
-        } finally {
-          setLoading(false);
-        }
-    };
+                              
+          return {
+            ...item,
+            status: isCompleted ? 'completed' : 'pending'
+          };
+        });
+        setInspections(updatedInspections);
+      }
+    } catch (error) {
+      console.error('Error fetching task:', error);
+      Alert.alert('Error', 'Failed to load maintenance task');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    if (id) fetchTaskDetails();
+  useEffect(() => {
+    loadTaskAndProgress();
   }, [id]);
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadTaskAndProgress();
+    }, [id])
+  );
 
   const completedCount = inspections.filter(i => i.status === 'completed').length;
   const progress = completedCount / inspections.length;
   const percentage = Math.round(progress * 100);
 
   const handleNavigate = (type: string) => {
-      router.push(`/maintenance/equipment/${type}?id=${id}`);
+      router.push(`/(technician)/maintenance/equipment/${type}?id=${id}&siteId=${task?.site_id || ''}&siteName=${task?.site_name || ''}`);
+  };
+
+  const handleSubmitForApproval = async () => {
+    if (!task || !id) return;
+
+    // Check if all required checks are completed
+    const allCompleted = inspections.every(i => i.status === 'completed');
+    if (!allCompleted) {
+      Alert.alert(
+        'Incomplete Checks',
+        'Please complete all required equipment checks before submitting.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Submit for Approval',
+      'Are you sure you want to submit this maintenance for supervisor approval?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Submit',
+          onPress: async () => {
+            try {
+              setSubmitting(true);
+              console.log('🚀 SUBMITTING maintenance for approval:', id);
+              console.log('📝 Work performed:', `Completed ${inspections.length} equipment checks`);
+              
+              const response = await api.post(`/technician/maintenance/${id}/submit`, {
+                work_performed: `Completed ${inspections.length} equipment checks`
+              });
+              
+              console.log('✅ Submit response:', response.data);
+              console.log('📊 New status:', response.data?.data?.status);
+              
+              Alert.alert(
+                'Success',
+                'Maintenance submitted for approval!',
+                [{ text: 'OK', onPress: () => router.back() }]
+              );
+            } catch (error: any) {
+              console.error('❌ Error submitting:', error);
+              console.error('Response data:', error.response?.data);
+              Alert.alert('Error', error.response?.data?.message || 'Failed to submit maintenance');
+            } finally {
+              setSubmitting(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   if (loading) {
       return (
           <SafeAreaView style={styles.container}>
-              <Text style={{padding: 20}}>Loading...</Text>
+              <ActivityIndicator size="large" color={Colors.primary} style={{marginTop: 40}} />
           </SafeAreaView>
       )
   }
@@ -164,6 +275,20 @@ export default function MaintenanceChecklist() {
                 </TouchableOpacity>
             ))}
         </View>
+
+        {/* Submit for Approval Button */}
+        {inspections.every(i => i.status === 'completed') && task?.status === 'in_progress' && (
+          <TouchableOpacity 
+            style={styles.submitButton}
+            onPress={handleSubmitForApproval}
+            disabled={submitting}
+          >
+            <Ionicons name="checkmark-circle" size={24} color="white" />
+            <Text style={styles.submitButtonText}>
+              {submitting ? 'Submitting...' : 'Submit for Approval'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
       </ScrollView>
     </SafeAreaView>
@@ -301,5 +426,25 @@ const styles = StyleSheet.create({
   },
   textSuccess: {
       color: Colors.success,
+  },
+  submitButton: {
+      backgroundColor: Colors.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 16,
+      borderRadius: 12,
+      marginTop: 24,
+      gap: 8,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+      elevation: 4,
+  },
+  submitButtonText: {
+      color: 'white',
+      fontSize: 18,
+      fontWeight: '600',
   }
 });

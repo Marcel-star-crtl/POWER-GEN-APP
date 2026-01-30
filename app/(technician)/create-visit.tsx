@@ -19,7 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/Colors';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { api } from '../../services/api';
+import { api, SERVER_URL } from '../../services/api';
 import { VisitFormData } from '../../types/visit.types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
@@ -752,7 +752,12 @@ export default function CreateVisit() {
                 <View style={styles.photoGrid}>
                   {photos.map((photo, index) => (
                     <View key={`photo-${index}-${photo.uri}`} style={styles.photoItem}>
-                      <Image source={{ uri: photo.uri }} style={styles.photoPreview} />
+                      <Image
+                        source={{
+                          uri: photo.uri?.startsWith('/uploads') ? `${SERVER_URL}${photo.uri}` : photo.uri,
+                        }}
+                        style={styles.photoPreview}
+                      />
                       <TouchableOpacity
                         style={styles.removePhotoButton}
                         onPress={() => removePhoto(index)}

@@ -64,10 +64,12 @@ export default function TaskDetail() {
   const handleStartWork = () => {
     if (task?.site_id) {
       router.push({
-        pathname: '/(technician)/create-visit',
+        pathname: '/(technician)/maintenance/select-equipment',
         params: {
           siteId: task.site_id,
           siteName: task.site_name || task.site_details?.Site_Name,
+          maintenanceId: task._id,
+          type: 'generator', // Default to generator, can be made dynamic
         },
       });
     }
@@ -187,6 +189,53 @@ export default function TaskDetail() {
           )}
         </Card>
 
+        {/* Equipment Checks Summary */}
+        {task.equipment_checks && (
+          <Card style={styles.section}>
+            <Text style={styles.sectionTitle}>Equipment Checks</Text>
+            <View>
+              {task.equipment_checks.generator_checks?.length > 0 && (
+                <View style={styles.checkItem}>
+                  <FontAwesome5 name="check-circle" size={16} color={Colors.success} />
+                  <Text style={styles.checkText}>
+                    Generator Check ({task.equipment_checks.generator_checks.length})
+                  </Text>
+                </View>
+              )}
+              {task.equipment_checks.power_cabinet_checks && (
+                <View style={styles.checkItem}>
+                  <FontAwesome5 name="check-circle" size={16} color={Colors.success} />
+                  <Text style={styles.checkText}>Power Cabinet Check</Text>
+                </View>
+              )}
+              {task.equipment_checks.grid_checks && (
+                <View style={styles.checkItem}>
+                  <FontAwesome5 name="check-circle" size={16} color={Colors.success} />
+                  <Text style={styles.checkText}>Grid Check</Text>
+                </View>
+              )}
+              {task.equipment_checks.shelter_checks && (
+                <View style={styles.checkItem}>
+                  <FontAwesome5 name="check-circle" size={16} color={Colors.success} />
+                  <Text style={styles.checkText}>Shelter Inspection</Text>
+                </View>
+              )}
+              {task.equipment_checks.fuel_tank_checks && (
+                <View style={styles.checkItem}>
+                  <FontAwesome5 name="check-circle" size={16} color={Colors.success} />
+                  <Text style={styles.checkText}>Fuel Tank Check</Text>
+                </View>
+              )}
+              {task.equipment_checks.cleaning_checks && (
+                <View style={styles.checkItem}>
+                  <FontAwesome5 name="check-circle" size={16} color={Colors.success} />
+                  <Text style={styles.checkText}>Site Cleaning</Text>
+                </View>
+              )}
+            </View>
+          </Card>
+        )}
+
         {/* Work Details */}
         {task.work_performed && (
           <Card style={styles.section}>
@@ -287,8 +336,19 @@ export default function TaskDetail() {
       {(task.status === 'scheduled' || task.status === 'approved' || task.status === 'in_progress') && (
         <View style={styles.footer}>
           <Button onPress={handleStartWork} style={styles.actionButton}>
-            {task.status === 'in_progress' ? 'Continue Work' : 'Start Work'}
+            {task.equipment_checks ? 'Continue Equipment Checks' : 
+             task.status === 'in_progress' ? 'Continue Work' : 'Start Equipment Check'}
           </Button>
+        </View>
+      )}
+      
+      {/* View-only message for completed tasks */}
+      {task.status === 'completed' && (
+        <View style={styles.footer}>
+          <View style={styles.completedBanner}>
+            <FontAwesome5 name="check-circle" size={20} color={Colors.success} />
+            <Text style={styles.completedText}>This task has been completed</Text>
+          </View>
         </View>
       )}
     </SafeAreaView>
@@ -381,6 +441,17 @@ const styles = StyleSheet.create({
     color: Colors.text,
     lineHeight: 20,
   },
+  checkItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  checkText: {
+    fontSize: 14,
+    color: Colors.text,
+    fontWeight: '500',
+  },
   issueItem: {
     marginBottom: 12,
   },
@@ -450,5 +521,19 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     width: '100%',
+  },
+  completedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: Colors.success + '20',
+    borderRadius: 8,
+    gap: 8,
+  },
+  completedText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.success,
   },
 });

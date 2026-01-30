@@ -2,11 +2,13 @@ import { Tabs } from 'expo-router';
 import { Colors } from '../../constants/Colors';
 import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../services/api';
 
 export default function TechnicianLayout() {
   const [unreadCount, setUnreadCount] = useState(0);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     fetchUnreadCount();
@@ -36,9 +38,12 @@ export default function TechnicianLayout() {
         tabBarStyle: {
           borderTopColor: Colors.border,
           backgroundColor: Colors.surface,
-          height: 60,
-          paddingBottom: 8,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
           paddingTop: 8,
+        },
+        tabBarSafeAreaInsets: {
+          bottom: 0,
         },
       }}
     >
@@ -52,11 +57,11 @@ export default function TechnicianLayout() {
         }}
       />
       <Tabs.Screen
-        name="tasks"
+        name="maintenance"
         options={{
-          title: 'Tasks',
+          title: 'Maintenance',
           tabBarIcon: ({ color, size }) => (
-            <FontAwesome5 name="tasks" size={size} color={color} />
+            <FontAwesome5 name="clipboard-list" size={size} color={color} />
           ),
         }}
       />
@@ -94,8 +99,7 @@ export default function TechnicianLayout() {
       <Tabs.Screen name="request-part" options={{ href: null }} />
       <Tabs.Screen name="select-site" options={{ href: null }} />
       <Tabs.Screen name="task-detail" options={{ href: null }} />
-      <Tabs.Screen name="maintenance" options={{ href: null }} />
-      <Tabs.Screen name="maintenance/index" options={{ href: null }} />
+      <Tabs.Screen name="tasks" options={{ href: null }} />
       <Tabs.Screen name="maintenance/equipment" options={{ href: null }} />
       <Tabs.Screen name="maintenance/equipment/[type]" options={{ href: null }} />
       <Tabs.Screen name="maintenance/[id]" options={{ href: null }} />
