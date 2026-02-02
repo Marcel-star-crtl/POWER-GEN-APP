@@ -5,7 +5,7 @@ import { authEvents } from './authEvents';
 
 console.log('✅ api.ts loaded (uploader=fetch)');
 
-export const SERVER_URL = 'http://192.168.16.29:5000'; // Updated to current local IP
+export const SERVER_URL = 'http://192.168.32.29:5000'; // Updated to current local IP
 const BASE_URL = `${SERVER_URL}/api`;
 
 export const api = axios.create({

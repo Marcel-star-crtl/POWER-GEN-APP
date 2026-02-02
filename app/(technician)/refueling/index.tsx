@@ -5,33 +5,43 @@ import { router } from 'expo-router';
 import { Colors } from '../../../constants/Colors';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { api } from '../../../services/api';
+import { ApiResponse } from '../../../types/common.types';
 
 interface Site {
   _id: string;
   name: string;
-  MTN_ID?: string;
+  site_id: string;
   currentFuelLevel?: number;
   tankCapacity?: number;
+  percentage?: number;
   lastRefuelDate?: string;
+  scheduledDate?: string;
+  maintenanceId?: string;
 }
 
-// Mock data replicating the screenshot
-const MOCK_SITES: Site[] = [
-  { _id: '1', name: 'Site A - Lagos', MTN_ID: 'TANK-001-A', currentFuelLevel: 3750, tankCapacity: 5000, lastRefuelDate: 'Jan 15, 2026' },
-  { _id: '2', name: 'Site B - Abuja', MTN_ID: 'TANK-002-B', currentFuelLevel: 2250, tankCapacity: 5000, lastRefuelDate: 'Jan 12, 2026' },
-  { _id: '3', name: 'Site C - Port Harcourt', MTN_ID: 'TANK-003-C', currentFuelLevel: 1000, tankCapacity: 5000, lastRefuelDate: 'Jan 10, 2026' },
-  { _id: '4', name: 'Site D - Kano', MTN_ID: 'TANK-004-D', currentFuelLevel: 3000, tankCapacity: 5000, lastRefuelDate: 'Jan 14, 2026' },
-];
-
 export default function RefuelingScreen() {
-  const [sites, setSites] = useState<Site[]>(MOCK_SITES);
+  const [sites, setSites] = useState<Site[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchSites();
+  }, []);
 
   const fetchSites = async () => {
-    // Ideally fetch from API, for now use mock to match design exactly
-    // await api.get('/sites');
-    setRefreshing(false);
+    try {
+      setLoading(true);
+      const response = await api.get<ApiResponse<Site[]>>('/technician/refuel/sites');
+      if (response.data.data) {
+        setSites(response.data.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch refueling sites:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   const getPercentage = (current: number, total: number) => {
@@ -39,13 +49,23 @@ export default function RefuelingScreen() {
   };
 
   const getStatusColor = (percentage: number) => {
-    if (percentage > 50) return Colors.success; // Green
-    if (percentage > 25) return '#F59E0B'; // Orange/Warning
-    return Colors.danger; // Red
+    if (percentage > 50) return Colors.success;
+    if (percentage > 25) return '#F59E0B';
+    return Colors.danger;
   };
 
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchSites();
+  };
+
+  const filteredSites = sites.filter(site =>
+    site.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    site.site_id?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   const renderItem = ({ item }: { item: Site }) => {
-    const percentage = getPercentage(item.currentFuelLevel || 0, item.tankCapacity || 5000);
+    const percentage = item.percentage || getPercentage(item.currentFuelLevel || 0, item.tankCapacity || 5000);
     const color = getStatusColor(percentage);
 
     return (
@@ -54,18 +74,21 @@ export default function RefuelingScreen() {
         onPress={() => router.push({
             pathname: '/(technician)/refueling/form',
             params: {
-                siteId: item._id,
+                siteId: item.site_id,
                 siteName: item.name,
-                tankId: item.MTN_ID || 'Unknown',
-                capacity: item.tankCapacity?.toString(),
-                currentLevel: item.currentFuelLevel?.toString()
+                tankId: item.site_id,
+                capacity: item.tankCapacity?.toString() || '5000',
+                currentLevel: item.currentFuelLevel?.toString() || '0',
+                maintenanceId: item.maintenanceId || ''
             }
         })}
       >
         <View style={styles.cardHeader}>
             <View>
                 <Text style={styles.siteName}>{item.name}</Text>
-                <Text style={styles.lastRefuel}>Last refuel: {item.lastRefuelDate || 'N/A'}</Text>
+                <Text style={styles.lastRefuel}>
+                  Last refuel: {item.lastRefuelDate ? new Date(item.lastRefuelDate).toLocaleDateString() : 'N/A'}
+                </Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
                 <Text style={[styles.percentage, { color: color }]}>{percentage}%</Text>
@@ -106,11 +129,21 @@ export default function RefuelingScreen() {
         </View>
 
         <FlatList
-            data={sites.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()))}
+            data={filteredSites}
             renderItem={renderItem}
             keyExtractor={item => item._id}
             contentContainerStyle={styles.list}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchSites(); }} />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            ListEmptyComponent={
+              !loading ? (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <FontAwesome5 name="tint-slash" size={48} color={Colors.textSecondary} />
+                  <Text style={{ marginTop: 16, color: Colors.textSecondary }}>
+                    No refueling tasks assigned
+                  </Text>
+                </View>
+              ) : null
+            }
         />
       </View>
     </SafeAreaView>

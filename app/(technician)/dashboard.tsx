@@ -155,17 +155,14 @@ export default function Dashboard() {
             color={Colors.primary}
             onPress={() => navigateToSiteSelection('preventive')}
           />
-          {/* Refueling quick-action temporarily disabled per request */}
-          {false && (
-            <QuickActionCard
-              title="REFUELING MANAGEMENT"
-              subtitle="Fuel Log & Tank Level"
-              badgeText={stats?.actionCounts?.refueling ? `${stats.actionCounts.refueling} Assigned` : "0 Assigned"}
-              icon="water"
-              color={Colors.warning}
-              onPress={() => navigateToSiteSelection('refueling')}
-            />
-          )}
+          <QuickActionCard
+            title="REFUELING MANAGEMENT"
+            subtitle="Fuel Log & Tank Level"
+            badgeText={stats?.actionCounts?.refueling ? `${stats.actionCounts.refueling} Assigned` : "0 Assigned"}
+            icon="water"
+            color={Colors.warning}
+            onPress={() => router.push('/(technician)/refueling')}
+          />
            <QuickActionCard
             title="CORRECTIVE MAINTENANCE"
             subtitle="Repairs & Issues"

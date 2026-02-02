@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { api } from '../../services/api';
 import { ApiResponse } from '../../types/common.types';
 import { Colors } from '../../constants/Colors';
@@ -40,11 +40,7 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    fetchNotifications();
-  }, []);
-
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       const response = await api.get<ApiResponse<Notification[]>>('/technician/notifications');
       if (response.data.data) {
@@ -56,7 +52,18 @@ export default function Notifications() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  // Refresh notifications when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchNotifications();
+    }, [fetchNotifications])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -81,8 +88,18 @@ export default function Notifications() {
     }
 
     // Navigate based on notification type
-    if (notification.type === 'task_assigned' || notification.type === 'task_created') {
-      if (notification.data.maintenanceId) {
+    if (notification.type === 'task_assigned' || notification.type === 'task_created' || notification.type === 'maintenance_scheduled') {
+      if (notification.data.maintenanceId && notification.data.siteId && notification.data.visitType) {
+        router.push({
+          pathname: '/(technician)/maintenance/checklist',
+          params: {
+            siteId: notification.data.siteId,
+            siteName: notification.data.siteName || `Site ${notification.data.siteId}`,
+            type: notification.data.visitType,
+            maintenanceId: notification.data.maintenanceId,
+          },
+        });
+      } else if (notification.data.maintenanceId) {
         router.push({
           pathname: '/(technician)/task-detail',
           params: { id: notification.data.maintenanceId },
@@ -103,6 +120,7 @@ export default function Notifications() {
     switch (type) {
       case 'task_assigned':
       case 'task_created':
+      case 'maintenance_scheduled':
         return 'tasks';
       case 'task_updated':
         return 'edit';

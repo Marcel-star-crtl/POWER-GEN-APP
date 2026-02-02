@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
+import { format } from 'date-fns';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { api } from '../../services/api';
@@ -143,10 +144,18 @@ export default function SelectSite() {
                   </View>
                   <Text style={styles.siteId}>{item.IHS_ID_SITE}</Text>
                   {item.next_maintenance?.type && (
-                      <View style={{marginTop: 8, flexDirection: 'row'}}>
+                      <View style={{marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
                           <Text style={{fontSize: 12, color: Colors.primary, backgroundColor: Colors.primary + '20', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4}}>
                               {item.next_maintenance.type}
                           </Text>
+                          {item.next_maintenance.date && (
+                            <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                                <FontAwesome5 name="calendar-alt" size={10} color={Colors.textSecondary} style={{marginRight: 4}} />
+                                <Text style={{fontSize: 12, color: Colors.textSecondary, fontWeight: '600'}}>
+                                    {format(new Date(item.next_maintenance.date), 'MMM dd, yyyy')}
+                                </Text>
+                            </View>
+                          )}
                       </View>
                   )}
                 </Card>

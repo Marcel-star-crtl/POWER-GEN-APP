@@ -16,6 +16,7 @@ import { Colors } from '../../../constants/Colors';
 import { FormSection } from '../../../components/ui/FormSection';
 import { InputField } from '../../../components/ui/InputField';
 import { PhotoCapture, PhotoAttachment } from '../../../components/ui/PhotoCapture';
+import { api, uploadAPI } from '../../../services/api';
 
 export default function RefuelFormScreen() {
   const params = useLocalSearchParams<{ 
@@ -23,17 +24,19 @@ export default function RefuelFormScreen() {
     siteName: string;
     tankId: string;
     capacity: string;
+    currentLevel: string;
+    maintenanceId?: string;
   }>();
 
   // State
   const [loading, setLoading] = useState(false);
   
   // Meter Readings
-  const [prevMeter, setPrevMeter] = useState('12450'); // Mocked previous
+  const [prevMeter, setPrevMeter] = useState('');
   const [currMeter, setCurrMeter] = useState('');
   
   // Fuel Info
-  const [prevQty, setPrevQty] = useState('1200'); // Mocked
+  const [prevQty, setPrevQty] = useState(params.currentLevel || '0');
   const [fuelFound, setFuelFound] = useState('');
   const [fuelAdded, setFuelAdded] = useState('');
   const [comments, setComments] = useState('');
@@ -84,15 +87,37 @@ export default function RefuelFormScreen() {
     
     try {
         setLoading(true);
-        // Simulate delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
         
-        Alert.alert('Success', 'Refueling record saved successfully', [
-            { text: 'OK', onPress: () => router.push('/(technician)/dashboard') }
-        ]);
-    } catch (error) {
-        console.error(error);
-        Alert.alert('Error', 'Failed to submit refueling record');
+        // Process and upload photos if any
+        const processedPhotos = photos.length > 0 
+          ? await uploadAPI.processAndUploadData(photos.map(p => p.uri))
+          : [];
+        
+        const payload = {
+          site_id: params.siteId,
+          site_name: params.siteName,
+          maintenanceId: params.maintenanceId,
+          opening_level: parseFloat(prevQty),
+          closing_level: parseFloat(fuelFound) + parseFloat(fuelAdded),
+          fuel_added: parseFloat(fuelAdded),
+          tank_capacity: parseFloat(params.capacity || '5000'),
+          opening_hours: prevMeter ? parseFloat(prevMeter) : undefined,
+          closing_hours: currMeter ? parseFloat(currMeter) : undefined,
+          comments,
+          photos: processedPhotos
+        };
+        
+        const response = await api.post('/technician/refuel', payload);
+        
+        if (response.data.success) {
+          Alert.alert('Success', 'Refueling record saved successfully', [
+              { text: 'OK', onPress: () => router.push('/(technician)/dashboard') }
+          ]);
+        }
+    } catch (error: any) {
+        console.error('Submit refuel error:', error);
+        const message = error?.response?.data?.error || error?.message || 'Failed to submit refueling record';
+        Alert.alert('Error', message);
     } finally {
         setLoading(false);
     }
