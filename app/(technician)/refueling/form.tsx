@@ -243,7 +243,7 @@ export default function RefuelFormScreen() {
                 </View>
             </FormSection>
 
-            <TouchableOpacity style={styles.accordionHeader} onPress={() => setShowDelivery(!showDelivery)}>
+            {/* <TouchableOpacity style={styles.accordionHeader} onPress={() => setShowDelivery(!showDelivery)}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <View style={styles.accordionIcon}>
                          <Ionicons name="location-outline" size={20} color={Colors.primary} />
@@ -258,7 +258,7 @@ export default function RefuelFormScreen() {
                     <InputField label="Vendor Name" placeholder="Select Vendor" />
                     <InputField label="Waybill Number" placeholder="Enter number" />
                 </View>
-            )}
+            )} */}
 
             <FormSection title="Documentation Photos" icon="camera-outline">
                 <PhotoCapture 

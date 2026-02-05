@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { api } from '../../services/api';
@@ -17,7 +17,12 @@ interface SiteItem {
     date: string | Date;
     type: string;
     priority: string;
+    status: 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'approved';
   };
+}
+
+interface GroupedSites {
+  [date: string]: SiteItem[];
 }
 
 export default function SelectSite() {
@@ -25,6 +30,7 @@ export default function SelectSite() {
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'in_progress' | 'completed'>('pending');
 
   useEffect(() => {
     const fetchSites = async () => {
@@ -45,6 +51,23 @@ export default function SelectSite() {
 
   const filteredSites = useMemo(() => {
     let result = sites;
+    
+    // Filter by status (check actual maintenance status)
+    result = result.filter(s => {
+      if (!s.next_maintenance) return false;
+      
+      const maintenanceStatus = s.next_maintenance.status?.toLowerCase() || '';
+      
+      if (statusFilter === 'pending') {
+        return ['pending', 'scheduled', 'approved'].includes(maintenanceStatus);
+      } else if (statusFilter === 'in_progress') {
+        return maintenanceStatus === 'in_progress';
+      } else if (statusFilter === 'completed') {
+        return ['completed', 'pending_approval'].includes(maintenanceStatus);
+      }
+      
+      return false;
+    });
     
     // Filter by required action if present
     if (params.requiredAction) {
@@ -73,7 +96,46 @@ export default function SelectSite() {
     return result.filter(s =>
       s.Site_Name?.toLowerCase().includes(q) || s.IHS_ID_SITE?.toLowerCase().includes(q)
     );
-  }, [sites, query, params.requiredAction]);
+  }, [sites, query, params.requiredAction, statusFilter]);
+
+  // Group sites by maintenance date
+  const groupedByDate = useMemo(() => {
+    const grouped: GroupedSites = {};
+    
+    filteredSites.forEach(site => {
+      let dateKey = 'No Date Scheduled';
+      
+      if (site.next_maintenance?.date) {
+        try {
+          const date = typeof site.next_maintenance.date === 'string' 
+            ? parseISO(site.next_maintenance.date) 
+            : new Date(site.next_maintenance.date);
+          dateKey = format(date, 'MMM dd, yyyy');
+        } catch (error) {
+          console.warn('Invalid date:', site.next_maintenance.date);
+        }
+      }
+      
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(site);
+    });
+    
+    return grouped;
+  }, [filteredSites]);
+
+  const sortedDates = useMemo(() => {
+    return Object.keys(groupedByDate).sort((a, b) => {
+      if (a === 'No Date Scheduled') return 1;
+      if (b === 'No Date Scheduled') return -1;
+      try {
+        return new Date(a).getTime() - new Date(b).getTime();
+      } catch {
+        return 0;
+      }
+    });
+  }, [groupedByDate]);
 
   const handleSelect = (site: SiteItem) => {
     console.log('🏢 Selected site:', site.Site_Name, site.IHS_ID_SITE, 'Maintenance ID:', site.next_maintenance?.maintenance_id);
@@ -131,38 +193,86 @@ export default function SelectSite() {
         />
       </View>
 
-        <ScrollView contentContainerStyle={filteredSites.length === 0 ? styles.emptyContainer : undefined}>
-          {filteredSites.length === 0 && !loading ? (
-            <Text style={styles.emptyText}>No assigned sites found for this action.</Text>
-          ) : (
-            filteredSites.map((item) => (
-              <TouchableOpacity key={item.IHS_ID_SITE} onPress={() => handleSelect(item)}>
-                <Card style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.siteName}>{item.Site_Name}</Text>
-                    <FontAwesome5 name="chevron-right" size={16} color={Colors.textSecondary} />
-                  </View>
-                  <Text style={styles.siteId}>{item.IHS_ID_SITE}</Text>
-                  {item.next_maintenance?.type && (
-                      <View style={{marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
-                          <Text style={{fontSize: 12, color: Colors.primary, backgroundColor: Colors.primary + '20', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4}}>
-                              {item.next_maintenance.type}
-                          </Text>
-                          {item.next_maintenance.date && (
-                            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                                <FontAwesome5 name="calendar-alt" size={10} color={Colors.textSecondary} style={{marginRight: 4}} />
-                                <Text style={{fontSize: 12, color: Colors.textSecondary, fontWeight: '600'}}>
-                                    {format(new Date(item.next_maintenance.date), 'MMM dd, yyyy')}
-                                </Text>
-                            </View>
-                          )}
+      <View style={styles.filterTabs}>
+        <TouchableOpacity 
+          style={[styles.filterTab, statusFilter === 'pending' && styles.filterTabActive]}
+          onPress={() => setStatusFilter('pending')}
+        >
+          <Text style={[styles.filterTabText, statusFilter === 'pending' && styles.filterTabTextActive]}>
+            Pending
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.filterTab, statusFilter === 'in_progress' && styles.filterTabActive]}
+          onPress={() => setStatusFilter('in_progress')}
+        >
+          <Text style={[styles.filterTabText, statusFilter === 'in_progress' && styles.filterTabTextActive]}>
+            In Progress
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.filterTab, statusFilter === 'completed' && styles.filterTabActive]}
+          onPress={() => setStatusFilter('completed')}
+        >
+          <Text style={[styles.filterTabText, statusFilter === 'completed' && styles.filterTabTextActive]}>
+            Completed
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={filteredSites.length === 0 ? styles.emptyContainer : undefined}>
+        {filteredSites.length === 0 && !loading ? (
+          <Text style={styles.emptyText}>No assigned sites found for this action.</Text>
+        ) : (
+          sortedDates.map((dateKey) => (
+            <View key={dateKey} style={styles.dateSection}>
+              <View style={styles.dateHeader}>
+                <View style={styles.dateInfo}>
+                  <FontAwesome5 name="calendar-alt" size={16} color={Colors.primary} style={styles.dateIcon} />
+                  <Text style={styles.dateText}>{dateKey}</Text>
+                </View>
+                <View style={styles.countBadge}>
+                  <Text style={styles.countBadgeText}>{groupedByDate[dateKey].length}</Text>
+                </View>
+              </View>
+
+              {groupedByDate[dateKey].map((item) => (
+                <TouchableOpacity key={item.IHS_ID_SITE} onPress={() => handleSelect(item)}>
+                  <Card style={styles.card}>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.siteName}>{item.Site_Name}</Text>
+                      <FontAwesome5 name="chevron-right" size={16} color={Colors.textSecondary} />
+                    </View>
+                    <Text style={styles.siteId}>{item.IHS_ID_SITE}</Text>
+                    {item.next_maintenance?.type && (
+                      <View style={styles.maintenanceRow}>
+                        <Text style={styles.maintenanceType}>
+                          {item.next_maintenance.type}
+                        </Text>
+                        {item.next_maintenance.priority && (
+                          <View style={[
+                            styles.priorityBadge,
+                            {
+                              backgroundColor: 
+                                item.next_maintenance.priority === 'high' ? '#FF6B6B' :
+                                item.next_maintenance.priority === 'medium' ? '#FFA500' :
+                                '#4CAF50'
+                            }
+                          ]}>
+                            <Text style={styles.priorityText}>
+                              {item.next_maintenance.priority.toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
                       </View>
-                  )}
-                </Card>
-              </TouchableOpacity>
-            ))
-          )}
-        </ScrollView>
+                    )}
+                  </Card>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ))
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -188,7 +298,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    // Note: removed backgroundColor/borderWidth to match design if needed, but kept for clarity
   },
   headerTitle: {
     fontSize: 18,
@@ -207,6 +316,68 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: Colors.surface,
     color: Colors.text,
+  },
+  filterTabs: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  filterTab: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+  },
+  filterTabActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterTabText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  filterTabTextActive: {
+    color: '#FFF',
+  },
+  dateSection: {
+    marginBottom: 24,
+  },
+  dateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  dateInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dateIcon: {
+    marginRight: 8,
+  },
+  dateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  countBadge: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  countBadgeText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   card: {
     marginHorizontal: 16,
@@ -227,6 +398,31 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 13,
     color: Colors.textSecondary,
+  },
+  maintenanceRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  maintenanceType: {
+    fontSize: 12,
+    color: Colors.primary,
+    backgroundColor: Colors.primary + '20',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  priorityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  priorityText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '600',
   },
   emptyContainer: {
     paddingTop: 32,
