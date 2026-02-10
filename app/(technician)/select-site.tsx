@@ -73,6 +73,15 @@ export default function SelectSite() {
     if (params.requiredAction) {
        const reqAction = params.requiredAction!.toLowerCase().trim();
        
+       if (reqAction === 'check-in') {
+          // For check-in, allow any site
+          const q = query.trim().toLowerCase();
+          if (!q) return sites;
+          return sites.filter(s =>
+            s.Site_Name?.toLowerCase().includes(q) || s.IHS_ID_SITE?.toLowerCase().includes(q)
+          );
+       }
+       
        result = result.filter(s => {
           if (!s.next_maintenance?.type) return false;
           

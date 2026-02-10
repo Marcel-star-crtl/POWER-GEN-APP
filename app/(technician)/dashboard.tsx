@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { Colors } from '../../constants/Colors';
 import { api } from '../../services/api';
@@ -9,6 +10,7 @@ import { ApiResponse } from '../../types/common.types';
 import { router } from 'expo-router';
 import { SummaryCard } from '../../components/SummaryCard';
 import { QuickActionCard } from '../../components/QuickActionCard';
+import { ActiveVisitCard } from '../../components/ActiveVisitCard';
 import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
 
  interface DashboardStats {
@@ -33,6 +35,7 @@ import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [activeVisit, setActiveVisit] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -114,6 +117,20 @@ export default function Dashboard() {
       // Short preview of logic - kept original logic
       const token = await AsyncStorage.getItem('accessToken');
       const response = await api.get<ApiResponse<DashboardStats>>('/technician/dashboard/me');
+
+      // Fetch active visit
+      try {
+          const visitRes = await api.get('/technician/visit/current');
+          if (visitRes.data.success) {
+            setActiveVisit(visitRes.data.data);
+          } else {
+            setActiveVisit(null);
+          }
+      } catch (error) {
+           // 404 or other error typically means no active visit
+           setActiveVisit(null);
+      }
+
       console.log('📊 Dashboard Response:', JSON.stringify(response.data, null, 2));
       if (response.data.data) {
         // Calculate aggregations if backend doesn't provide them yet
@@ -188,6 +205,31 @@ export default function Dashboard() {
             <Text style={styles.date}>{formattedDate}</Text>
           </View>
         </View>
+
+        {/* Active Visit Section */}
+        {activeVisit ? (
+            <ActiveVisitCard 
+                visit={activeVisit} 
+                onCheckOut={() => {
+                    setActiveVisit(null);
+                    fetchDashboard();
+                }} 
+            />
+        ) : (
+             <TouchableOpacity 
+                style={styles.checkInButton}
+                onPress={() => navigateToSiteSelection('check-in')}
+             >
+                <View style={styles.checkInIconContainer}>
+                    <Ionicons name="location" size={24} color={Colors.white} />
+                </View>
+                <View>
+                    <Text style={styles.checkInTitle}>Start Site Visit</Text>
+                    <Text style={styles.checkInSubtitle}>Check in to begin work</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color={Colors.white} style={{ marginLeft: 'auto' }} />
+             </TouchableOpacity>
+        )}
 
         {/* Summary Section */}
         <View style={styles.sectionHeader}>
@@ -304,5 +346,37 @@ const styles = StyleSheet.create({
   },
   actionsContainer: {
     marginBottom: 24,
-  }
+  },
+  checkInButton: {
+    backgroundColor: Colors.success, // Use success green for starting
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    shadowColor: Colors.success,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  checkInIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  checkInTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: Colors.white,
+    marginBottom: 4,
+  },
+  checkInSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+  },
 });

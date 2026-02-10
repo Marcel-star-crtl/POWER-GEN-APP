@@ -5,6 +5,7 @@ export const Colors = {
   success: '#16a34a', // green-600
   warning: '#ca8a04', // yellow-600
   danger: '#dc2626', // red-600
+  error: '#dc2626', // Alias for danger
   background: '#f8fafc', // slate-50
   surface: '#ffffff',
   text: '#0f172a', // slate-900

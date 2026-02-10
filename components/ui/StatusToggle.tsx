@@ -104,7 +104,7 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
           
           {onCommentChange && (
             <View style={styles.commentContainer}>
-              <Text style={styles.commentLabel}>Comments / Observations *</Text>
+              <Text style={styles.commentLabel}>Comments / Observations (optional)</Text>
               <TextInput
                 style={styles.commentInput}
                 multiline

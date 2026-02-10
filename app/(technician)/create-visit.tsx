@@ -208,6 +208,68 @@ export default function CreateVisit() {
     return formData;
   };
 
+  const buildOfflineRecord = (submitType: 'draft' | 'submit') => {
+    const generators_checked = genNumber || genBrand || genHourMeter || genComments
+      ? [{
+          generator_number: genNumber ? parseInt(genNumber) : undefined,
+          brand: genBrand || undefined,
+          ch_actuel: genHourMeter ? parseFloat(genHourMeter) : undefined,
+          comments_cph: genComments || undefined,
+        }]
+      : undefined;
+
+    const fuel_data = fuelCardNumber || qtyFound || qtyAdded || qtyLeft
+      ? {
+          fuel_card_number: fuelCardNumber || undefined,
+          qte_trouvee: qtyFound ? parseFloat(qtyFound) : undefined,
+          qte_ajoutee: qtyAdded ? parseFloat(qtyAdded) : undefined,
+          qte_laissee: qtyLeft ? parseFloat(qtyLeft) : undefined,
+        }
+      : undefined;
+
+    const electrical_data = eneoWorking || earthing || ph1Voltage || ph2Voltage || ph3Voltage
+      ? {
+          eneo_working: eneoWorking || undefined,
+          earthing_ohm: earthing ? parseFloat(earthing) : undefined,
+          n_ph1_voltage: ph1Voltage ? parseFloat(ph1Voltage) : undefined,
+          n_ph2_voltage: ph2Voltage ? parseFloat(ph2Voltage) : undefined,
+          n_ph3_voltage: ph3Voltage ? parseFloat(ph3Voltage) : undefined,
+        }
+      : undefined;
+
+    const Issues_Found = genIssues || otherIssues
+      ? {
+          DG_Issues: genIssues || undefined,
+          Any_Other_Issue: otherIssues || undefined,
+        }
+      : undefined;
+
+    return {
+      siteId,
+      siteName: selectedSiteName || sites.find((s) => s.IHS_ID_SITE === siteId)?.Site_Name || siteId,
+      submit_type: submitType,
+      createdAt: new Date().toISOString(),
+      fields: {
+        Actual_Date_Visit: visitDate,
+        Type_of_Visit: visitType,
+        technician_id: user?.id,
+        hours_on_site: hoursOnSite || undefined,
+        work_performed: workPerformed || undefined,
+        generators_checked,
+        fuel_data,
+        electrical_data,
+        Issues_Found,
+      },
+      photos,
+    };
+  };
+
+  const saveOfflineVisit = async (submitType: 'draft' | 'submit') => {
+    const record = buildOfflineRecord(submitType);
+    const key = `offline_visit_${record.siteId}_${Date.now()}`;
+    await AsyncStorage.setItem(key, JSON.stringify(record));
+  };
+
   const handleSaveDraft = async () => {
     if (!siteId || !visitType) {
       Alert.alert('Required Fields', 'Please fill in Site ID and Visit Type');
@@ -301,7 +363,12 @@ export default function CreateVisit() {
       ]);
     } catch (error: any) {
       console.error('❌ Failed to save draft:', error);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to save draft');
+      if (!error.response) {
+        await saveOfflineVisit('draft');
+        Alert.alert('Offline', 'No internet connection. Draft saved locally and will sync later.');
+      } else {
+        Alert.alert('Error', error.response?.data?.message || 'Failed to save draft');
+      }
     } finally {
       setLoading(false);
     }
@@ -410,7 +477,13 @@ export default function CreateVisit() {
       ]);
     } catch (error) {
       console.error('❌ Failed to submit visit:', error);
-      Alert.alert('Error', 'Failed to submit visit. Please try again.');
+      const anyError = error as any;
+      if (!anyError?.response) {
+        await saveOfflineVisit('submit');
+        Alert.alert('Offline', 'No internet connection. Visit saved locally and will submit when online.');
+      } else {
+        Alert.alert('Error', 'Failed to submit visit. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

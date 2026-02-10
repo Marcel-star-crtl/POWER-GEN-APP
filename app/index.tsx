@@ -21,5 +21,9 @@ export default function Index() {
     return <Redirect href="/(technician)/dashboard" />;
   }
 
+  if (isAuthenticated && user?.role === 'operations') {
+    return <Redirect href="/(operations)/dashboard" />;
+  }
+
   return <Redirect href="/(auth)/login" />;
 }

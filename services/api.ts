@@ -4,7 +4,9 @@ import { authEvents } from "./authEvents";
 
 console.log("✅ api.ts loaded (uploader=fetch)");
 
-export const SERVER_URL = "http://192.168.1.198:5000"; // Updated to current local IP
+export const SERVER_URL = "https://powergen-api-90kz.onrender.com";
+
+// export const SERVER_URL = "http://192.168.1.183:5000";
 const BASE_URL = `${SERVER_URL}/api`;
 
 export const api = axios.create({
@@ -138,6 +140,26 @@ export const siteAPI = {
 
   // Get specific generator details
   getGenerator: (generatorId: string) => api.get(`/generators/${generatorId}`),
+};
+
+// ============================================
+// OPERATIONS API (Site Audits)
+// ============================================
+
+export const operationsAPI = {
+  getSites: () => api.get("/operations/sites"),
+  listAudits: (params?: {
+    status?: string;
+    siteId?: string;
+    page?: number;
+    limit?: number;
+  }) => api.get("/operations/audits", { params }),
+  getAudit: (id: string) => api.get(`/operations/audits/${id}`),
+  createAudit: (data: any) => api.post("/operations/audits", data),
+  updateAudit: (id: string, data: any) =>
+    api.put(`/operations/audits/${id}`, data),
+  updateAuditStatus: (id: string, status: string) =>
+    api.patch(`/operations/audits/${id}/status`, { status }),
 };
 
 // ============================================

@@ -20,6 +20,25 @@ interface TaskItem {
   checkCount?: number;
 }
 
+interface OfflineVisitRecord {
+  siteId: string;
+  siteName?: string;
+  submit_type: 'draft' | 'submit';
+  createdAt?: string;
+  fields: {
+    Actual_Date_Visit?: string;
+    Type_of_Visit?: string;
+    technician_id?: string;
+    hours_on_site?: string;
+    work_performed?: string;
+    generators_checked?: any;
+    fuel_data?: any;
+    electrical_data?: any;
+    Issues_Found?: any;
+  };
+  photos?: Array<{ uri: string; category?: string; description?: string }>;
+}
+
 export default function Tasks() {
   const [activeTab, setActiveTab] = useState<'drafts' | 'submitted'>('submitted');
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -29,11 +48,84 @@ export default function Tasks() {
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
+      const syncOfflineVisits = async () => {
+        const keys = await AsyncStorage.getAllKeys();
+        const offlineKeys = keys.filter((k) => k.startsWith('offline_visit_'));
+
+        for (const key of offlineKeys) {
+          const raw = await AsyncStorage.getItem(key);
+          if (!raw) continue;
+          let record: OfflineVisitRecord | null = null;
+          try {
+            record = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+
+          if (!record?.siteId) continue;
+
+          const formData = new FormData();
+          if (record.fields?.Actual_Date_Visit) {
+            formData.append('Actual_Date_Visit', record.fields.Actual_Date_Visit);
+          }
+          if (record.fields?.Type_of_Visit) {
+            formData.append('Type_of_Visit', record.fields.Type_of_Visit);
+          }
+          if (record.fields?.technician_id) {
+            formData.append('technician_id', record.fields.technician_id);
+          }
+          formData.append('submit_type', record.submit_type || 'draft');
+
+          if (record.fields?.hours_on_site) {
+            formData.append('hours_on_site', record.fields.hours_on_site);
+          }
+          if (record.fields?.work_performed) {
+            formData.append('work_performed', record.fields.work_performed);
+          }
+          if (record.fields?.generators_checked) {
+            formData.append('generators_checked', JSON.stringify(record.fields.generators_checked));
+          }
+          if (record.fields?.fuel_data) {
+            formData.append('fuel_data', JSON.stringify(record.fields.fuel_data));
+          }
+          if (record.fields?.electrical_data) {
+            formData.append('electrical_data', JSON.stringify(record.fields.electrical_data));
+          }
+          if (record.fields?.Issues_Found) {
+            formData.append('Issues_Found', JSON.stringify(record.fields.Issues_Found));
+          }
+
+          (record.photos || []).forEach((photo, index) => {
+            formData.append('photos', {
+              uri: photo.uri,
+              name: `offline_${index}.jpg`,
+              type: 'image/jpeg',
+            } as any);
+          });
+
+          try {
+            await api.post(`/sites/${record.siteId}/visit`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            await AsyncStorage.removeItem(key);
+          } catch (err: any) {
+            if (!err?.response) {
+              // Still offline, stop attempting.
+              break;
+            }
+            // Server error; keep for later.
+          }
+        }
+      };
+
+      await syncOfflineVisits();
+
       const allDrafts: TaskItem[] = [];
 
       // 1. Fetch Drafts from AsyncStorage
       const keys = await AsyncStorage.getAllKeys();
       const draftKeys = keys.filter(k => k.startsWith('draft_'));
+      const offlineVisitKeys = keys.filter(k => k.startsWith('offline_visit_'));
       
       // Group drafts by maintenanceId/siteId
       // Key format: draft_${type}_${siteId}_${maintenanceId}
@@ -71,6 +163,25 @@ export default function Tasks() {
                checkCount: group.types.size
            });
       });
+
+      for (const key of offlineVisitKeys) {
+        const raw = await AsyncStorage.getItem(key);
+        if (!raw) continue;
+        try {
+          const record = JSON.parse(raw) as OfflineVisitRecord;
+          allDrafts.push({
+            id: key,
+            siteId: record.siteId,
+            siteName: record.siteName || `Site ${record.siteId}`,
+            type: record.fields?.Type_of_Visit || 'Visit',
+            status: 'Draft',
+            date: record.createdAt || new Date().toISOString(),
+            checkCount: 1,
+          });
+        } catch {
+          // ignore malformed
+        }
+      }
 
       // 2. Fetch Submitted from API
       if (activeTab === 'submitted') {

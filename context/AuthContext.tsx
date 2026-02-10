@@ -102,14 +102,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { accessToken, refreshToken, user } = response.data.data!;
 
       console.log('👤 User role:', user.role);
-      // Only allow technicians for now
-      if (user.role !== 'technician') {
-        throw new Error('Access restricted to technicians only');
+      // Allow technicians and operations
+      if (!['technician', 'operations'].includes(user.role)) {
+        throw new Error('Access restricted to technicians and operations only');
       }
 
       console.log('💾 Saving token and user to AsyncStorage...');
       await AsyncStorage.setItem('accessToken', accessToken);
       await AsyncStorage.setItem('user', JSON.stringify(user));
+      await AsyncStorage.setItem(
+        'offlineLogin',
+        JSON.stringify({ email: normalizedEmail, password: normalizedPassword })
+      );
 
       console.log('✅ Token saved successfully');
       setState({
@@ -122,10 +126,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       console.log('🚀 Navigating to dashboard...');
-      router.replace('/(technician)/dashboard');
+      if (user.role === 'operations') {
+        router.replace('/(operations)/dashboard');
+      } else {
+        router.replace('/(technician)/dashboard');
+      }
     } catch (error: any) {
       console.error('❌ Login error:', error);
       console.error('❌ Error response:', error.response?.data);
+      const isNetworkError = !error.response;
+      if (isNetworkError) {
+        const offlineStr = await AsyncStorage.getItem('offlineLogin');
+        const cachedUserStr = await AsyncStorage.getItem('user');
+        const cachedToken = await AsyncStorage.getItem('accessToken');
+        if (offlineStr && cachedUserStr) {
+          try {
+            const offline = JSON.parse(offlineStr);
+            const cachedUser = JSON.parse(cachedUserStr);
+            if (
+              offline.email === normalizedEmail &&
+              offline.password === normalizedPassword &&
+              cachedUser?.role === 'technician'
+            ) {
+              setState({
+                user: cachedUser,
+                accessToken: cachedToken,
+                refreshToken: null,
+                isAuthenticated: true,
+                loading: false,
+                error: null,
+              });
+              router.replace('/(technician)/dashboard');
+              return;
+            }
+          } catch {
+            // fall through to normal error
+          }
+        }
+        const message = 'No internet connection. Please connect once to enable offline login.';
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          error: message,
+        }));
+        throw new Error(message);
+      }
+
       const message = error.response?.data?.message || error.message || 'Login failed';
       setState((prev) => ({
         ...prev,
