@@ -36,8 +36,81 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const syncOfflineVisits = async () => {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const offlineKeys = keys.filter((k) => k.startsWith('offline_visit_'));
+
+      for (const key of offlineKeys) {
+        const raw = await AsyncStorage.getItem(key);
+        if (!raw) continue;
+        let record: any = null;
+        try {
+          record = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+
+        if (!record?.siteId) continue;
+
+        const formData = new FormData();
+        if (record.fields?.Actual_Date_Visit) {
+          formData.append('Actual_Date_Visit', record.fields.Actual_Date_Visit);
+        }
+        if (record.fields?.Type_of_Visit) {
+          formData.append('Type_of_Visit', record.fields.Type_of_Visit);
+        }
+        if (record.fields?.technician_id) {
+          formData.append('technician_id', record.fields.technician_id);
+        }
+        formData.append('submit_type', record.submit_type || 'draft');
+
+        if (record.fields?.hours_on_site) {
+          formData.append('hours_on_site', record.fields.hours_on_site);
+        }
+        if (record.fields?.work_performed) {
+          formData.append('work_performed', record.fields.work_performed);
+        }
+        if (record.fields?.generators_checked) {
+          formData.append('generators_checked', JSON.stringify(record.fields.generators_checked));
+        }
+        if (record.fields?.fuel_data) {
+          formData.append('fuel_data', JSON.stringify(record.fields.fuel_data));
+        }
+        if (record.fields?.electrical_data) {
+          formData.append('electrical_data', JSON.stringify(record.fields.electrical_data));
+        }
+        if (record.fields?.Issues_Found) {
+          formData.append('Issues_Found', JSON.stringify(record.fields.Issues_Found));
+        }
+
+        (record.photos || []).forEach((photo: any, index: number) => {
+          formData.append('photos', {
+            uri: photo.uri,
+            name: `offline_${index}.jpg`,
+            type: 'image/jpeg',
+          } as any);
+        });
+
+        try {
+          await api.post(`/sites/${record.siteId}/visit`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+          await AsyncStorage.removeItem(key);
+        } catch (err: any) {
+          if (!err?.response) {
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Offline visit sync failed:', error);
+    }
+  };
+
   const fetchDashboard = async () => {
     try {
+      await syncOfflineVisits();
       // Short preview of logic - kept original logic
       const token = await AsyncStorage.getItem('accessToken');
       const response = await api.get<ApiResponse<DashboardStats>>('/technician/dashboard/me');
@@ -147,6 +220,17 @@ export default function Dashboard() {
         </View>
         
         <View style={styles.actionsContainer}>
+          <QuickActionCard
+            title="SYNC NOW"
+            subtitle="Upload offline visits"
+            badgeText="Manual sync"
+            icon="cloud-upload"
+            color={Colors.success}
+            onPress={async () => {
+              await syncOfflineVisits();
+              await fetchDashboard();
+            }}
+          />
           <QuickActionCard
             title="PREVENTIVE MAINTENANCE"
             subtitle="Scheduled Checks"
