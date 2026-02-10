@@ -7,7 +7,7 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
-  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -15,6 +15,7 @@ import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { api, uploadAPI } from '../../services/api';
 
 export default function PartInstallationScreen() {
   const params = useLocalSearchParams<{ 
@@ -32,42 +33,75 @@ export default function PartInstallationScreen() {
   const [oldCondition, setOldCondition] = useState('');
   
   // New Part installation State
-  const [installDate, setInstallDate] = useState('');
+  const [installDate, setInstallDate] = useState(new Date().toISOString().slice(0, 16).replace('T', ' ')); // Default to current time
   const [newSerial, setNewSerial] = useState('');
   
   // Testing & Verification State
   const [testPerformed, setTestPerformed] = useState(false);
   const [testResult, setTestResult] = useState('');
   const [notes, setNotes] = useState('');
+  
+  const [loading, setLoading] = useState(false);
 
   const isReplacement = params.isReplacement === 'true';
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     // Validate
     if (!installDate || !newSerial || !testPerformed || !testResult) {
-       Alert.alert('Missing Fields', 'Please fill in all required fields.');
+       Alert.alert('Missing Fields', 'Please fill in all required fields (New Serial, Test Results, etc).');
        return;
     }
     if (isReplacement && (!removalDate || !oldSerial || !oldCondition)) {
-        Alert.alert('Missing Fields', 'Please fill in removal details.');
+        Alert.alert('Missing Fields', 'Please fill in old part removal details.');
         return;
     }
 
-    // Submit logic (mock)
-    Alert.alert('Success', 'Part installation recorded successfully', [
-        { text: 'OK', onPress: () => router.back() }
-    ]);
+    try {
+        setLoading(true);
+        // In a real app, photos would be uploaded here using uploadAPI
+        
+        const payload = {
+            requestId: params.requestId,
+            part_name: params.partName,
+            site_name: params.siteName,
+            is_replacement: isReplacement,
+            install_date: installDate,
+            new_serial: newSerial,
+            old_serial: oldSerial,
+            removal_date: removalDate,
+            old_condition: oldCondition,
+            test_performed: testPerformed,
+            test_result: testResult,
+            notes: notes
+        };
+
+        const response = await api.post('/technician/install-part', payload);
+
+        if (response.data.success) {
+            Alert.alert('Success', 'Part installation recorded successfully', [
+                { text: 'OK', onPress: () => router.back() }
+            ]);
+        }
+    } catch (error: any) {
+        Alert.alert('Error', error.response?.data?.error || 'Failed to submit installation data');
+    } finally {
+        setLoading(false);
+    }
   };
 
-  const DatePickerField = ({ label, value, onChange }: any) => (
+  const DateInputField = ({ label, value, onChange }: any) => (
     <View style={styles.fieldContainer}>
         <Text style={styles.label}>{label} <Text style={styles.required}>*</Text></Text>
-        <TouchableOpacity style={styles.dateInput}>
-            <Text style={value ? styles.inputText : styles.placeholder}>
-                {value || 'mm/dd/yyyy --:-- --'}
-            </Text>
-            <FontAwesome5 name="calendar-alt" size={16} color={Colors.textSecondary} />
-        </TouchableOpacity>
+        <View style={styles.dateInputContainer}>
+            <TextInput
+                style={styles.dateInputText}
+                placeholder="YYYY-MM-DD HH:mm"
+                value={value}
+                onChangeText={onChange}
+            />
+            <FontAwesome5 name="calendar-alt" size={16} color={Colors.textSecondary} style={{ marginRight: 12 }} />
+        </View>
+        <Text style={styles.helperText}>Format: YYYY-MM-DD HH:mm</Text>
     </View>
   );
 
@@ -101,14 +135,14 @@ export default function PartInstallationScreen() {
             <Card style={styles.section}>
                 <Text style={styles.sectionTitle}>Old Part Removal</Text>
                 
-                <DatePickerField 
+                <DateInputField 
                     label="Removal Date & Time" 
                     value={removalDate} 
                     onChange={setRemovalDate} 
                 />
 
                 <View style={styles.fieldContainer}>
-                    <Text style={styles.label}>Old Part Serial Number</Text>
+                    <Text style={styles.label}>Old Part Serial Number <Text style={styles.required}>*</Text></Text>
                     <TextInput
                         style={styles.input}
                         placeholder="Enter serial number"
@@ -119,24 +153,25 @@ export default function PartInstallationScreen() {
 
                 <View style={styles.fieldContainer}>
                     <Text style={styles.label}>Condition of Removed Part <Text style={styles.required}>*</Text></Text>
-                    <View style={styles.pickerPlaceholder}>
-                        <Text style={styles.placeholder}>{oldCondition || 'Select condition'}</Text>
-                        <FontAwesome5 name="chevron-down" size={14} color={Colors.textSecondary} />
+                    <View style={styles.pickerRow}>
+                       {['Good', 'Faulty', 'Damaged'].map((cond) => (
+                           <TouchableOpacity 
+                                key={cond}
+                                style={[styles.choiceChip, oldCondition === cond && styles.choiceChipSelected]}
+                                onPress={() => setOldCondition(cond)}
+                           >
+                               <Text style={[styles.choiceText, oldCondition === cond && styles.choiceTextSelected]}>{cond}</Text>
+                           </TouchableOpacity>
+                       ))}
                     </View>
                 </View>
 
                 <View style={styles.fieldContainer}>
-                    <Text style={styles.label}>Photos of Old Part <Text style={styles.required}>*</Text></Text>
-                    <View style={styles.photoRow}>
-                        <TouchableOpacity style={styles.photoButton}>
-                            <FontAwesome5 name="camera" size={16} color={Colors.textSecondary} />
-                            <Text style={styles.photoButtonText}>Camera</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.photoButton}>
-                            <FontAwesome5 name="upload" size={16} color={Colors.textSecondary} />
-                            <Text style={styles.photoButtonText}>Upload</Text>
-                        </TouchableOpacity>
-                    </View>
+                    <Text style={styles.label}>Photos (Optional)</Text>
+                    <TouchableOpacity style={styles.photoButton}>
+                        <FontAwesome5 name="camera" size={16} color={Colors.textSecondary} />
+                        <Text style={styles.photoButtonText}>Take Photo</Text>
+                    </TouchableOpacity>
                 </View>
             </Card>
         )}
@@ -144,7 +179,7 @@ export default function PartInstallationScreen() {
         <Card style={styles.section}>
             <Text style={styles.sectionTitle}>New Part Installation</Text>
             
-            <DatePickerField 
+            <DateInputField 
                 label="Installation Date & Time" 
                 value={installDate} 
                 onChange={setInstallDate} 
@@ -158,20 +193,6 @@ export default function PartInstallationScreen() {
                     value={newSerial}
                     onChangeText={setNewSerial}
                 />
-            </View>
-
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Photos of Installed Part <Text style={styles.required}>*</Text></Text>
-                <View style={styles.photoRow}>
-                    <TouchableOpacity style={styles.photoButton}>
-                        <FontAwesome5 name="camera" size={16} color={Colors.textSecondary} />
-                        <Text style={styles.photoButtonText}>Camera</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.photoButton}>
-                        <FontAwesome5 name="upload" size={16} color={Colors.textSecondary} />
-                        <Text style={styles.photoButtonText}>Upload</Text>
-                    </TouchableOpacity>
-                </View>
             </View>
         </Card>
 
@@ -190,9 +211,16 @@ export default function PartInstallationScreen() {
 
             <View style={styles.fieldContainer}>
                 <Text style={styles.label}>Test Results <Text style={styles.required}>*</Text></Text>
-                <View style={styles.pickerPlaceholder}>
-                    <Text style={styles.placeholder}>{testResult || 'Select result'}</Text>
-                    <FontAwesome5 name="chevron-down" size={14} color={Colors.textSecondary} />
+                <View style={styles.pickerRow}>
+                       {['Pass', 'Fail'].map((res) => (
+                           <TouchableOpacity 
+                                key={res}
+                                style={[styles.choiceChip, testResult === res && styles.choiceChipSelected]}
+                                onPress={() => setTestResult(res)}
+                           >
+                               <Text style={[styles.choiceText, testResult === res && styles.choiceTextSelected]}>{res}</Text>
+                           </TouchableOpacity>
+                       ))}
                 </View>
             </View>
 
@@ -209,7 +237,12 @@ export default function PartInstallationScreen() {
             </View>
         </Card>
 
-        <Button title="Complete Installation" onPress={handleSubmit} style={styles.submitButton} />
+        <Button 
+            title={loading ? "Submitting..." : "Complete Installation"} 
+            onPress={handleSubmit} 
+            style={styles.submitButton}
+            disabled={loading}
+        />
         <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
@@ -299,38 +332,50 @@ const styles = StyleSheet.create({
     color: Colors.text,
     backgroundColor: '#fff',
   },
-  dateInput: {
+  dateInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 8,
-    padding: 12,
     backgroundColor: '#fff',
   },
-  inputText: {
+  dateInputText: {
+    flex: 1,
+    padding: 12,
+    fontSize: 14,
     color: Colors.text,
   },
-  placeholder: {
+  helperText: {
+    fontSize: 12,
     color: Colors.textSecondary,
+    marginTop: 4,
   },
-  pickerPlaceholder: {
+  pickerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
+  },
+  choiceChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 8,
-    padding: 12,
     backgroundColor: '#fff',
   },
-  photoRow: {
-    flexDirection: 'row',
-    gap: 12,
+  choiceChipSelected: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  choiceText: {
+    color: Colors.text,
+    fontSize: 14,
+  },
+  choiceTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
   },
   photoButton: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
