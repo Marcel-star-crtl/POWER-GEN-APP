@@ -1,10 +1,19 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
-import { Colors } from '../../constants/Colors';
-import { operationsAPI, uploadAPI } from '../../services/api';
-import { PhotoAttachment } from '../../components/ui/PhotoCapture';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { PhotoAttachment } from "../../components/ui/PhotoCapture";
+import { Colors } from "../../constants/Colors";
+import { useAuth } from "../../context/AuthContext";
+import { operationsAPI, uploadAPI } from "../../services/api";
 
 interface DraftMeta {
   key: string;
@@ -20,12 +29,13 @@ interface DraftMeta {
 
 export default function OperationsDashboard() {
   const router = useRouter();
+  const { signOut } = useAuth();
   const [stats, setStats] = useState({ submitted: 0, drafts: 0, total: 0 });
   const [refreshing, setRefreshing] = useState(false);
 
   const getCurrentUserId = useCallback(async () => {
     try {
-      const userStr = await AsyncStorage.getItem('user');
+      const userStr = await AsyncStorage.getItem("user");
       if (!userStr) return undefined;
       const user = JSON.parse(userStr);
       return user?.id || user?._id;
@@ -36,18 +46,27 @@ export default function OperationsDashboard() {
 
   const loadStats = useCallback(async () => {
     try {
-      const response = await operationsAPI.listAudits({ status: 'submitted', limit: 1 });
+      const response = await operationsAPI.listAudits({
+        status: "submitted",
+        limit: 1,
+      });
       const totalResponse = await operationsAPI.listAudits({ limit: 1 });
 
       const currentUserId = await getCurrentUserId();
-      const draftKeys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('operations_audit_draft_'));
+      const draftKeys = (await AsyncStorage.getAllKeys()).filter((k) =>
+        k.startsWith("operations_audit_draft_"),
+      );
       let ownDraftsCount = 0;
 
       for (const key of draftKeys) {
         const draftStr = await AsyncStorage.getItem(key);
         if (!draftStr) continue;
         const draft = JSON.parse(draftStr) as DraftMeta;
-        if (!draft.createdBy || !currentUserId || draft.createdBy === currentUserId) {
+        if (
+          !draft.createdBy ||
+          !currentUserId ||
+          draft.createdBy === currentUserId
+        ) {
           ownDraftsCount += 1;
         }
       }
@@ -58,7 +77,7 @@ export default function OperationsDashboard() {
         drafts: ownDraftsCount,
       });
     } catch (error) {
-      console.error('Operations dashboard stats error:', error);
+      console.error("Operations dashboard stats error:", error);
     }
   }, [getCurrentUserId]);
 
@@ -75,9 +94,11 @@ export default function OperationsDashboard() {
   const syncDrafts = async () => {
     try {
       const currentUserId = await getCurrentUserId();
-      const draftKeys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('operations_audit_draft_'));
+      const draftKeys = (await AsyncStorage.getAllKeys()).filter((k) =>
+        k.startsWith("operations_audit_draft_"),
+      );
       if (draftKeys.length === 0) {
-        Alert.alert('No drafts', 'There are no drafts to sync.');
+        Alert.alert("No drafts", "There are no drafts to sync.");
         return;
       }
 
@@ -85,59 +106,82 @@ export default function OperationsDashboard() {
         const draftStr = await AsyncStorage.getItem(key);
         if (!draftStr) continue;
         const draft = JSON.parse(draftStr) as DraftMeta;
-        if (draft.createdBy && currentUserId && draft.createdBy !== currentUserId) {
+        if (
+          draft.createdBy &&
+          currentUserId &&
+          draft.createdBy !== currentUserId
+        ) {
           continue;
         }
 
         const sectionedPhotos = [
-          ...(draft.photos || []).map((photo) => ({ ...photo, __section: 'general' })),
-          ...Object.entries(draft.sectionPhotos || {}).flatMap(([section, items]) =>
-            (items || []).map((photo) => ({ ...photo, __section: section }))
+          ...(draft.photos || []).map((photo) => ({
+            ...photo,
+            __section: "general",
+          })),
+          ...Object.entries(draft.sectionPhotos || {}).flatMap(
+            ([section, items]) =>
+              (items || []).map((photo) => ({ ...photo, __section: section })),
           ),
         ];
 
-        const processedPhotos = sectionedPhotos.length > 0
-          ? await uploadAPI.processAndUploadData(sectionedPhotos)
-          : [];
+        const processedPhotos =
+          sectionedPhotos.length > 0
+            ? await uploadAPI.processAndUploadData(sectionedPhotos)
+            : [];
 
         const payload = {
           ...draft.payload,
           photos: (processedPhotos || []).map((p: any) => ({
             url: p.uri || p.url || p,
-            category: 'general',
-            description: p.__section || ''
+            category: "general",
+            description: p.__section || "",
           })),
-          status: 'draft'
+          status: "draft",
         };
 
         if (draft.auditId) {
           try {
             await operationsAPI.updateAudit(draft.auditId, payload);
           } catch (updateError) {
-            console.warn('Draft update failed, creating a new draft instead:', updateError);
+            console.warn(
+              "Draft update failed, creating a new draft instead:",
+              updateError,
+            );
             const res = await operationsAPI.createAudit(payload);
             draft.auditId = res.data?.data?._id;
-            await AsyncStorage.setItem(key, JSON.stringify({ ...draft, auditId: draft.auditId }));
+            await AsyncStorage.setItem(
+              key,
+              JSON.stringify({ ...draft, auditId: draft.auditId }),
+            );
           }
         } else {
           const res = await operationsAPI.createAudit(payload);
           draft.auditId = res.data?.data?._id;
-          await AsyncStorage.setItem(key, JSON.stringify({ ...draft, auditId: draft.auditId }));
+          await AsyncStorage.setItem(
+            key,
+            JSON.stringify({ ...draft, auditId: draft.auditId }),
+          );
         }
       }
 
-      Alert.alert('Synced', 'All drafts have been synced to the web as drafts.');
+      Alert.alert(
+        "Synced",
+        "All drafts have been synced to the web as drafts.",
+      );
       await loadStats();
     } catch (error) {
-      console.error('Draft sync error:', error);
-      Alert.alert('Sync failed', 'Some drafts could not be synced.');
+      console.error("Draft sync error:", error);
+      Alert.alert("Sync failed", "Some drafts could not be synced.");
     }
   };
 
   return (
     <ScrollView
       style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
     >
       <Text style={styles.title}>Operations Dashboard</Text>
       <Text style={styles.subtitle}>Site Audit Checklist</Text>
@@ -158,20 +202,33 @@ export default function OperationsDashboard() {
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/(operations)/select-site')}>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => router.push("/(operations)/select-site")}
+        >
           <Text style={styles.primaryButtonText}>Start New Audit</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/(operations)/drafts')}>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => router.push("/(operations)/drafts")}
+        >
           <Text style={styles.secondaryButtonText}>View Drafts</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/(operations)/submitted')}>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => router.push("/(operations)/submitted")}
+        >
           <Text style={styles.secondaryButtonText}>View Submitted Audits</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.secondaryButton} onPress={syncDrafts}>
           <Text style={styles.secondaryButtonText}>Sync Drafts</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
+          <Text style={styles.logoutButtonText}>Log Out</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -186,7 +243,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: "700",
     color: Colors.text,
   },
   subtitle: {
@@ -196,21 +253,21 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     marginTop: 20,
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
   },
   statCard: {
     flex: 1,
-     backgroundColor: Colors.surface,
+    backgroundColor: Colors.surface,
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.border,
-    alignItems: 'center',
+    alignItems: "center",
   },
   statValue: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: "700",
     color: Colors.primary,
   },
   statLabel: {
@@ -226,24 +283,35 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     paddingVertical: 14,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   primaryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
+    color: "#fff",
+    fontWeight: "600",
     fontSize: 16,
   },
   secondaryButton: {
-     backgroundColor: Colors.surface,
+    backgroundColor: Colors.surface,
     paddingVertical: 14,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
     borderWidth: 1,
     borderColor: Colors.border,
   },
   secondaryButtonText: {
     color: Colors.text,
-    fontWeight: '600',
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  logoutButton: {
+    backgroundColor: Colors.danger,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  logoutButtonText: {
+    color: "#fff",
+    fontWeight: "600",
     fontSize: 16,
   },
 });

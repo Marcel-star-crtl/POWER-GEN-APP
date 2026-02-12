@@ -10,7 +10,6 @@ import { ApiResponse } from '../../types/common.types';
 import { router } from 'expo-router';
 import { SummaryCard } from '../../components/SummaryCard';
 import { QuickActionCard } from '../../components/QuickActionCard';
-import { ActiveVisitCard } from '../../components/ActiveVisitCard';
 import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
 
  interface DashboardStats {
@@ -35,7 +34,7 @@ import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [activeVisit, setActiveVisit] = useState<any>(null);
+  const [dailyAttendance, setDailyAttendance] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -118,17 +117,16 @@ export default function Dashboard() {
       const token = await AsyncStorage.getItem('accessToken');
       const response = await api.get<ApiResponse<DashboardStats>>('/technician/dashboard/me');
 
-      // Fetch active visit
+      // Fetch daily attendance
       try {
-          const visitRes = await api.get('/technician/visit/current');
-          if (visitRes.data.success) {
-            setActiveVisit(visitRes.data.data);
+          const attendanceRes = await api.get('/technician/daily-status');
+          if (attendanceRes.data.success && attendanceRes.data.checkedIn) {
+            setDailyAttendance(attendanceRes.data.data);
           } else {
-            setActiveVisit(null);
+            setDailyAttendance(null);
           }
       } catch (error) {
-           // 404 or other error typically means no active visit
-           setActiveVisit(null);
+           setDailyAttendance(null);
       }
 
       console.log('📊 Dashboard Response:', JSON.stringify(response.data, null, 2));
@@ -177,6 +175,23 @@ export default function Dashboard() {
     fetchDashboard();
   };
 
+  const handleCheckIn = async () => {
+    setLoading(true);
+    try {
+        const res = await api.post('/technician/daily-check-in', { });
+        if (res.data.success) {
+            setDailyAttendance(res.data.data);
+            alert('Checked in successfully!');
+            fetchDashboard();
+        }
+    } catch (error) {
+        console.error('Check in failed', error);
+        alert('Check in failed');
+    } finally {
+        setLoading(false);
+    }
+  };
+
   const navigateToSiteSelection = (type: string) => {
     // Corrective maintenance goes directly to parts (no assignment required)
     if (type === 'corrective') {
@@ -206,26 +221,28 @@ export default function Dashboard() {
           </View>
         </View>
 
-        {/* Active Visit Section */}
-        {activeVisit ? (
-            <ActiveVisitCard 
-                visit={activeVisit} 
-                onCheckOut={() => {
-                    setActiveVisit(null);
-                    fetchDashboard();
-                }} 
-            />
+        {/* Daily Attendance Section */}
+        {dailyAttendance ? (
+            <View style={{ backgroundColor: 'white', padding: 16, borderRadius: 12, marginBottom: 20, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 }}> 
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                    <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
+                    <Text style={{ marginLeft: 8, fontSize: 18, fontWeight: 'bold', color: Colors.text }}>Checked In</Text>
+                </View>
+                <Text style={{ color: Colors.gray }}>
+                    You are checked in for today at {new Date(dailyAttendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+            </View>
         ) : (
              <TouchableOpacity 
                 style={styles.checkInButton}
-                onPress={() => navigateToSiteSelection('check-in')}
+                onPress={handleCheckIn}
              >
                 <View style={styles.checkInIconContainer}>
                     <Ionicons name="location" size={24} color={Colors.white} />
                 </View>
                 <View>
-                    <Text style={styles.checkInTitle}>Start Site Visit</Text>
-                    <Text style={styles.checkInSubtitle}>Check in to begin work</Text>
+                    <Text style={styles.checkInTitle}>Check In for Today</Text>
+                    <Text style={styles.checkInSubtitle}>Tap to mark your attendance</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={24} color={Colors.white} style={{ marginLeft: 'auto' }} />
              </TouchableOpacity>

@@ -1,10 +1,16 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '../services/api';
-import { User, AuthState, ApiResponse } from '../types/common.types';
-import { router, usePathname } from 'expo-router';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
+import React, {
+    createContext,
+    useContext,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
+import { api } from "../services/api";
+import { ApiResponse, AuthState, User } from "../types/common.types";
 
-import { authEvents } from '../services/authEvents';
+import { authEvents } from "../services/authEvents";
 
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;
@@ -13,7 +19,9 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [state, setState] = useState<AuthState>({
     user: null,
     accessToken: null,
@@ -29,7 +37,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       hasInitialized.current = true;
       loadStoredAuth();
     }
-    
+
     // Subscribe to auth events (like 401 logout)
     const unsubscribe = authEvents.subscribe(() => {
       setState({
@@ -38,11 +46,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshToken: null,
         isAuthenticated: false,
         loading: false,
-        error: 'Session expired',
+        error: "Session expired",
       });
       // Only redirect if not already on login page
-      if (!window.location?.pathname?.includes('/login')) {
-        router.replace('/(auth)/login');
+      if (!window.location?.pathname?.includes("/login")) {
+        router.replace("/(auth)/login");
       }
     });
 
@@ -51,20 +59,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loadStoredAuth = async () => {
     try {
-      console.log('🔄 Loading stored auth...');
+      console.log("🔄 Loading stored auth...");
       const [token, userStr] = await Promise.all([
-        AsyncStorage.getItem('accessToken'),
-        AsyncStorage.getItem('user'),
+        AsyncStorage.getItem("accessToken"),
+        AsyncStorage.getItem("user"),
       ]);
 
-      console.log('📦 Token exists:', !!token);
-      console.log('📦 User exists:', !!userStr);
+      console.log("📦 Token exists:", !!token);
+      console.log("📦 User exists:", !!userStr);
 
       if (token && userStr) {
         const user = JSON.parse(userStr);
-        console.log('✅ Auth restored for:', user.email);
-        console.log('👤 User role:', user.role);
-        console.log('🔐 Is authenticated:', true);
+        console.log("✅ Auth restored for:", user.email);
+        console.log("👤 User role:", user.role);
+        console.log("🔐 Is authenticated:", true);
         setState((prev) => ({
           ...prev,
           accessToken: token,
@@ -72,50 +80,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           isAuthenticated: true,
           loading: false,
         }));
-        console.log('✅ State updated - should redirect now');
+        console.log("✅ State updated - should redirect now");
       } else {
-        console.log('⚠️ No stored auth found');
+        console.log("⚠️ No stored auth found");
         setState((prev) => ({ ...prev, loading: false }));
       }
     } catch (error) {
-      console.error('❌ Failed to load auth state:', error);
+      console.error("❌ Failed to load auth state:", error);
       setState((prev) => ({ ...prev, loading: false }));
     }
   };
 
   const signIn = async (email: string, password: string) => {
-    const normalizedEmail = (email || '').trim().toLowerCase();
+    const normalizedEmail = (email || "").trim().toLowerCase();
     // Passwords typically should be treated verbatim, but copy/paste often adds
     // trailing whitespace/newlines that cause confusing "Invalid credentials".
-    const normalizedPassword = (password || '').replace(/\u00A0/g, ' ').trim();
+    const normalizedPassword = (password || "").replace(/\u00A0/g, " ").trim();
 
-    console.log('🔐 SignIn started for:', normalizedEmail);
+    console.log("🔐 SignIn started for:", normalizedEmail);
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      console.log('📡 Sending login request...');
-      const response = await api.post<ApiResponse<{ accessToken: string; refreshToken?: string; user: User }>>('/auth/login', {
+      console.log("📡 Sending login request...");
+      const response = await api.post<
+        ApiResponse<{ accessToken: string; refreshToken?: string; user: User }>
+      >("/auth/login", {
         email: normalizedEmail,
         password: normalizedPassword,
       });
 
-      console.log('✅ Login response received:', response.data);
+      console.log("✅ Login response received:", response.data);
       const { accessToken, refreshToken, user } = response.data.data!;
 
-      console.log('👤 User role:', user.role);
-      // Allow technicians and operations
-      if (!['technician', 'operations'].includes(user.role)) {
-        throw new Error('Access restricted to technicians and operations only');
+      console.log("👤 User role:", user.role);
+      // Allow technicians, operations, and supervisors
+      if (!["technician", "operations", "supervisor"].includes(user.role)) {
+        throw new Error(
+          "Access restricted to technicians, operations, and supervisors only",
+        );
       }
 
-      console.log('💾 Saving token and user to AsyncStorage...');
-      await AsyncStorage.setItem('accessToken', accessToken);
-      await AsyncStorage.setItem('user', JSON.stringify(user));
+      console.log("💾 Saving token and user to AsyncStorage...");
+      await AsyncStorage.setItem("accessToken", accessToken);
+      await AsyncStorage.setItem("user", JSON.stringify(user));
       await AsyncStorage.setItem(
-        'offlineLogin',
-        JSON.stringify({ email: normalizedEmail, password: normalizedPassword })
+        "offlineLogin",
+        JSON.stringify({
+          email: normalizedEmail,
+          password: normalizedPassword,
+        }),
       );
 
-      console.log('✅ Token saved successfully');
+      console.log("✅ Token saved successfully");
       setState({
         user,
         accessToken,
@@ -125,20 +140,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error: null,
       });
 
-      console.log('🚀 Navigating to dashboard...');
-      if (user.role === 'operations') {
-        router.replace('/(operations)/dashboard');
+      console.log("🚀 Navigating to dashboard...");
+      if (user.role === "operations" || user.role === "supervisor") {
+        router.replace("/(operations)/dashboard");
       } else {
-        router.replace('/(technician)/dashboard');
+        router.replace("/(technician)/dashboard");
       }
     } catch (error: any) {
-      console.error('❌ Login error:', error);
-      console.error('❌ Error response:', error.response?.data);
+      console.error("❌ Login error:", error);
+      console.error("❌ Error response:", error.response?.data);
       const isNetworkError = !error.response;
       if (isNetworkError) {
-        const offlineStr = await AsyncStorage.getItem('offlineLogin');
-        const cachedUserStr = await AsyncStorage.getItem('user');
-        const cachedToken = await AsyncStorage.getItem('accessToken');
+        const offlineStr = await AsyncStorage.getItem("offlineLogin");
+        const cachedUserStr = await AsyncStorage.getItem("user");
+        const cachedToken = await AsyncStorage.getItem("accessToken");
         if (offlineStr && cachedUserStr) {
           try {
             const offline = JSON.parse(offlineStr);
@@ -146,7 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (
               offline.email === normalizedEmail &&
               offline.password === normalizedPassword &&
-              cachedUser?.role === 'technician'
+              cachedUser?.role === "technician"
             ) {
               setState({
                 user: cachedUser,
@@ -156,14 +171,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 loading: false,
                 error: null,
               });
-              router.replace('/(technician)/dashboard');
+              router.replace("/(technician)/dashboard");
               return;
             }
           } catch {
             // fall through to normal error
           }
         }
-        const message = 'No internet connection. Please connect once to enable offline login.';
+        const message =
+          "No internet connection. Please connect once to enable offline login.";
         setState((prev) => ({
           ...prev,
           loading: false,
@@ -172,7 +188,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error(message);
       }
 
-      const message = error.response?.data?.message || error.message || 'Login failed';
+      const message =
+        error.response?.data?.message || error.message || "Login failed";
       setState((prev) => ({
         ...prev,
         loading: false,
@@ -184,8 +201,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
-      await AsyncStorage.removeItem('accessToken');
-      await AsyncStorage.removeItem('user');
+      await AsyncStorage.removeItem("accessToken");
+      await AsyncStorage.removeItem("user");
       setState({
         user: null,
         accessToken: null,
@@ -194,9 +211,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading: false,
         error: null,
       });
-      router.replace('/(auth)/login');
+      router.replace("/(auth)/login");
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error("Logout error:", error);
     }
   };
 
@@ -210,7 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };
