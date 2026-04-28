@@ -4,15 +4,14 @@ import { authEvents } from "./authEvents";
 
 console.log("✅ api.ts loaded (uploader=fetch)");
 
-export const SERVER_URL = "https://powergen-api-90kz.onrender.com";
+// export const SERVER_URL = "https://powergen-api-90kz.onrender.com";
 
-// export const SERVER_URL = "http://192.168.1.183:5000";
+export const SERVER_URL = "http://192.168.1.198:5000";
 const BASE_URL = `${SERVER_URL}/api`;
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000, // Increased timeout for file uploads
-  // Don't set default Content-Type - let each request set its own
+  timeout: 60000,
 });
 
 api.interceptors.request.use(

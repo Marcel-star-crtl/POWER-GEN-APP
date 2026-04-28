@@ -10,6 +10,7 @@ export interface SuggestionChipProps {
 }
 
 export const SuggestionChip: React.FC<SuggestionChipProps> = ({ text, icon, onPress }) => {
+  const { t } = require('react-i18next');
   return (
     <Pressable 
       style={({ pressed }) => [
@@ -26,7 +27,7 @@ export const SuggestionChip: React.FC<SuggestionChipProps> = ({ text, icon, onPr
           style={styles.icon}
         />
       )}
-      <Text style={styles.chipText}>{text}</Text>
+      <Text style={styles.chipText}>{t(text, text)}</Text>
     </Pressable>
   );
 };
@@ -40,9 +41,10 @@ export const SuggestionChips: React.FC<SuggestionChipsProps> = ({
   suggestions, 
   onSuggestionPress 
 }) => {
+  const { t } = require('react-i18next');
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Suggestions</Text>
+      <Text style={styles.title}>{t('suggestions.title', 'Suggestions')}</Text>
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}

@@ -1,6 +1,8 @@
+
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../context/AuthContext';
-// import '../global.css'; // Uncomment if using NativeWind
+import { I18nextProvider } from 'react-i18next';
+import i18n from '../i18n';
 
 function RootLayoutNav() {
   return (
@@ -15,8 +17,10 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootLayoutNav />
-    </AuthProvider>
+    <I18nextProvider i18n={i18n}>
+      <AuthProvider>
+        <RootLayoutNav />
+      </AuthProvider>
+    </I18nextProvider>
   );
 }

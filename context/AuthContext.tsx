@@ -1,14 +1,15 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, {
-    createContext,
-    useContext,
-    useEffect,
-    useRef,
-    useState,
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
 import { api } from "../services/api";
 import { ApiResponse, AuthState, User } from "../types/common.types";
+import { isTechnicianRole } from "../utils/roles";
 
 import { authEvents } from "../services/authEvents";
 
@@ -112,10 +113,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const { accessToken, refreshToken, user } = response.data.data!;
 
       console.log("👤 User role:", user.role);
-      // Allow technicians, operations, and supervisors
-      if (!["technician", "operations", "supervisor"].includes(user.role)) {
+      // Allow technicians, AC, operations, and supervisors
+      if (
+        ![
+          "technician",
+          "ac",
+          "data_collector",
+          "operations",
+          "supervisor",
+          "fuel",
+        ].includes(user.role)
+      ) {
         throw new Error(
-          "Access restricted to technicians, operations, and supervisors only",
+          "Access restricted to technicians, AC, fuel, operations, and supervisors only",
         );
       }
 
@@ -161,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             if (
               offline.email === normalizedEmail &&
               offline.password === normalizedPassword &&
-              cachedUser?.role === "technician"
+              isTechnicianRole(cachedUser?.role)
             ) {
               setState({
                 user: cachedUser,
@@ -188,8 +198,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         throw new Error(message);
       }
 
-      const message =
-        error.response?.data?.message || error.message || "Login failed";
+      const backendErrorText = [
+        error.response?.data?.error,
+        error.response?.data?.message,
+        error.message,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      const roleEnumMismatch =
+        backendErrorText.includes("role") &&
+        backendErrorText.includes("not a valid enum value") &&
+        backendErrorText.includes("ac");
+
+      const message = roleEnumMismatch
+        ? "This account has an invalid server role configuration (ac). Please contact your administrator to update the role before signing in."
+        : error.response?.data?.message || error.message || "Login failed";
       setState((prev) => ({
         ...prev,
         loading: false,

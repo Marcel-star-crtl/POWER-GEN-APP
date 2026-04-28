@@ -2,11 +2,12 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
+import { useTranslation } from 'react-i18next';
 
 interface QuickActionCardProps {
   title: string;
   subtitle: string;
-  badgeText: string;
+  badgeText: string | { key: string; count?: number };
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
   onPress: () => void;
@@ -22,11 +23,13 @@ export const QuickActionCard: React.FC<QuickActionCardProps> = ({
   onPress,
   style
 }) => {
-  // Generate light background color from the main color (approximate logic)
-  // Since we can't easily manipulate hex here without a library, we'll assume the color passed is the dark/main one
-  // and we might need to pass a light variant or just use opacity.
-  // Using opacity for background 10%
-
+  const { t } = useTranslation();
+  let badgeContent = '';
+  if (typeof badgeText === 'string') {
+    badgeContent = t(badgeText);
+  } else if (badgeText && typeof badgeText === 'object') {
+    badgeContent = t(badgeText.key, { count: badgeText.count });
+  }
   return (
     <TouchableOpacity 
       style={[styles.container, style]} 
@@ -35,16 +38,16 @@ export const QuickActionCard: React.FC<QuickActionCardProps> = ({
     >
       <View style={styles.contentContainer}>
         {/* Icon Container */}
-        <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
+        <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}> 
           <Ionicons name={icon} size={24} color={color} />
         </View>
 
         {/* Text Content */}
         <View style={styles.textContainer}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.subtitle}>{subtitle}</Text>
-          <View style={[styles.badge, { backgroundColor: color + '20' }]}>
-            <Text style={[styles.badgeText, { color: color }]}>{badgeText}</Text>
+          <Text style={styles.title}>{t(title)}</Text>
+          <Text style={styles.subtitle}>{t(subtitle)}</Text>
+          <View style={[styles.badge, { backgroundColor: color + '20' }]}> 
+            <Text style={[styles.badgeText, { color: color }]}>{badgeContent}</Text>
           </View>
         </View>
 
@@ -61,7 +64,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
-    shadowColor: '#000',
+    shadowColor: Colors.text,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,

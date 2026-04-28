@@ -1,11 +1,14 @@
+import "../i18n";
+
+
 import { Redirect } from "expo-router";
 import { ActivityIndicator, Text, View } from "react-native";
 import { Colors } from "../constants/Colors";
 import { useAuth } from "../context/AuthContext";
+import { isTechnicianRole } from "../utils/roles";
 
 export default function Index() {
   const { isAuthenticated, user, loading } = useAuth();
-
   // Show loading screen while checking auth
   if (loading) {
     return (
@@ -24,9 +27,8 @@ export default function Index() {
       </View>
     );
   }
-
   // Redirect based on authentication state
-  if (isAuthenticated && user?.role === "technician") {
+  if (isAuthenticated && isTechnicianRole(user?.role)) {
     return <Redirect href="/(technician)/dashboard" />;
   }
 

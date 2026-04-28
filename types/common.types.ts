@@ -1,8 +1,27 @@
+// export interface User {
+//   id: string;
+//   email: string;
+//   fullName: string;
+//   role: 'admin' | 'supervisor' | 'technician' | 'ac' | 'diesel_manager' | 'data_collector' | 'analyst' | 'operations';
+//   phone?: string;
+//   isActive: boolean;
+//   assignedTechnicians?: string[];
+// }
+
 export interface User {
   id: string;
   email: string;
   fullName: string;
-  role: 'admin' | 'supervisor' | 'technician' | 'diesel_manager' | 'data_collector' | 'analyst' | 'operations';
+  role:
+    | "admin"
+    | "supervisor"
+    | "technician"
+    | "ac"
+    | "diesel_manager"
+    | "data_collector"
+    | "analyst"
+    | "operations"
+    | "fuel";
   phone?: string;
   isActive: boolean;
   assignedTechnicians?: string[];
@@ -31,7 +50,7 @@ export interface PaginationMeta {
 
 export interface ApiResponse<T> {
   success: boolean;
-  data?: T;
+  data?: T;[]
   message?: string;
   error?: string;
   pagination?: PaginationMeta;
@@ -44,7 +63,7 @@ export interface ApiError {
 
 export interface Photo {
   url: string;
-  category: 'before' | 'during' | 'after' | 'issue' | 'parts' | 'general';
+  category: "before" | "during" | "after" | "issue" | "parts" | "general";
   description: string;
   uploaded_at: Date;
 }
@@ -58,6 +77,21 @@ export interface Photo {
 // - 'approved': Visit approved by supervisor
 // - 'rejected': Visit rejected, needs revision
 // - 'completed': Fully completed and approved
-export type StatusType = 'pending' | 'scheduled' | 'in_progress' | 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'completed';
-export type PriorityType = 'low' | 'medium' | 'high' | 'critical';
-export type VisitType = 'PM' | 'END' | 'RF' | 'PM+END' | 'PM+RF' | 'RF+END' | 'PM+RF+END';
+export type StatusType =
+  | "pending"
+  | "scheduled"
+  | "in_progress"
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "completed";
+export type PriorityType = "low" | "medium" | "high" | "critical";
+export type VisitType =
+  | "PM"
+  | "END"
+  | "RF"
+  | "PM+END"
+  | "PM+RF"
+  | "RF+END"
+  | "PM+RF+END";

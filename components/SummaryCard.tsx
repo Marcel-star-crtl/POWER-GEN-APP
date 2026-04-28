@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { Card } from './ui/Card';
 import { Colors } from '../constants/Colors';
+import { useTranslation } from 'react-i18next';
 
 interface SummaryCardProps {
   label: string;
@@ -11,6 +12,7 @@ interface SummaryCardProps {
 }
 
 export const SummaryCard: React.FC<SummaryCardProps> = ({ label, count, type, style }) => {
+  const { t } = useTranslation();
   const getStatusColor = () => {
     switch (type) {
       case 'pending': return Colors.warning;
@@ -23,7 +25,7 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({ label, count, type, st
   return (
     <Card style={[styles.card, style]}>
       <Text style={[styles.count, { color: getStatusColor() }]}>{count}</Text>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label}>{t(label)}</Text>
     </Card>
   );
 };

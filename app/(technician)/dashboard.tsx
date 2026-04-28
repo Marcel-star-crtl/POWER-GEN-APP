@@ -1,18 +1,31 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../context/AuthContext';
-import { Colors } from '../../constants/Colors';
-import { api } from '../../services/api';
-import { ApiResponse } from '../../types/common.types';
-import { router } from 'expo-router';
-import { SummaryCard } from '../../components/SummaryCard';
-import { QuickActionCard } from '../../components/QuickActionCard';
-import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
+import React from "react";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+// import { SafeAreaView } from "react-native-safe-area-context";
+import LanguageSwitcher from "../../components/LanguageSwitcher";
+import { QuickActionCard } from "../../components/QuickActionCard";
+import { SummaryCard } from "../../components/SummaryCard";
+import { LoadingOverlay } from "../../components/ui/LoadingOverlay";
+import { Colors } from "../../constants/Colors";
+import { useAuth } from "../../context/AuthContext";
+import { api } from "../../services/api";
+import { ApiResponse } from "../../types/common.types";
+// import { isRestrictedAcScopeRole } from "../../utils/roles";
+import { isFuelRole, isRestrictedAcScopeRole } from "../../utils/roles";
 
- interface DashboardStats {
+interface DashboardStats {
   pendingTasks: number;
   scheduledTasks: number;
   inProgressTasks: number;
@@ -31,8 +44,15 @@ import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
   };
 }
 
-export default function Dashboard() {
+// ─────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────
+export default function TechnicianDashboard() {
   const { user } = useAuth();
+  const { t, i18n } = useTranslation();
+  const isAcTechnician = isRestrictedAcScopeRole(user?.role);
+  const isFuelTechnician = isFuelRole(user?.role);
+
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [dailyAttendance, setDailyAttendance] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -41,7 +61,7 @@ export default function Dashboard() {
   const syncOfflineVisits = async () => {
     try {
       const keys = await AsyncStorage.getAllKeys();
-      const offlineKeys = keys.filter((k) => k.startsWith('offline_visit_'));
+      const offlineKeys = keys.filter((k) => k.startsWith("offline_visit_"));
 
       for (const key of offlineKeys) {
         const raw = await AsyncStorage.getItem(key);
@@ -57,46 +77,55 @@ export default function Dashboard() {
 
         const formData = new FormData();
         if (record.fields?.Actual_Date_Visit) {
-          formData.append('Actual_Date_Visit', record.fields.Actual_Date_Visit);
+          formData.append("Actual_Date_Visit", record.fields.Actual_Date_Visit);
         }
         if (record.fields?.Type_of_Visit) {
-          formData.append('Type_of_Visit', record.fields.Type_of_Visit);
+          formData.append("Type_of_Visit", record.fields.Type_of_Visit);
         }
         if (record.fields?.technician_id) {
-          formData.append('technician_id', record.fields.technician_id);
+          formData.append("technician_id", record.fields.technician_id);
         }
-        formData.append('submit_type', record.submit_type || 'draft');
+        formData.append("submit_type", record.submit_type || "draft");
 
         if (record.fields?.hours_on_site) {
-          formData.append('hours_on_site', record.fields.hours_on_site);
+          formData.append("hours_on_site", record.fields.hours_on_site);
         }
         if (record.fields?.work_performed) {
-          formData.append('work_performed', record.fields.work_performed);
+          formData.append("work_performed", record.fields.work_performed);
         }
         if (record.fields?.generators_checked) {
-          formData.append('generators_checked', JSON.stringify(record.fields.generators_checked));
+          formData.append(
+            "generators_checked",
+            JSON.stringify(record.fields.generators_checked),
+          );
         }
         if (record.fields?.fuel_data) {
-          formData.append('fuel_data', JSON.stringify(record.fields.fuel_data));
+          formData.append("fuel_data", JSON.stringify(record.fields.fuel_data));
         }
         if (record.fields?.electrical_data) {
-          formData.append('electrical_data', JSON.stringify(record.fields.electrical_data));
+          formData.append(
+            "electrical_data",
+            JSON.stringify(record.fields.electrical_data),
+          );
         }
         if (record.fields?.Issues_Found) {
-          formData.append('Issues_Found', JSON.stringify(record.fields.Issues_Found));
+          formData.append(
+            "Issues_Found",
+            JSON.stringify(record.fields.Issues_Found),
+          );
         }
 
         (record.photos || []).forEach((photo: any, index: number) => {
-          formData.append('photos', {
+          formData.append("photos", {
             uri: photo.uri,
             name: `offline_${index}.jpg`,
-            type: 'image/jpeg',
+            type: "image/jpeg",
           } as any);
         });
 
         try {
           await api.post(`/sites/${record.siteId}/visit`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
+            headers: { "Content-Type": "multipart/form-data" },
           });
           await AsyncStorage.removeItem(key);
         } catch (err: any) {
@@ -106,52 +135,76 @@ export default function Dashboard() {
         }
       }
     } catch (error) {
-      console.error('Offline visit sync failed:', error);
+      console.error("Offline visit sync failed:", error);
     }
   };
 
   const fetchDashboard = async () => {
     try {
       await syncOfflineVisits();
-      // Short preview of logic - kept original logic
-      const token = await AsyncStorage.getItem('accessToken');
-      const response = await api.get<ApiResponse<DashboardStats>>('/technician/dashboard/me');
+      const response = await api.get<ApiResponse<DashboardStats>>(
+        "/technician/dashboard/me",
+      );
 
       // Fetch daily attendance
       try {
-          const attendanceRes = await api.get('/technician/daily-status');
-          if (attendanceRes.data.success && attendanceRes.data.checkedIn) {
-            setDailyAttendance(attendanceRes.data.data);
-          } else {
-            setDailyAttendance(null);
-          }
-      } catch (error) {
-           setDailyAttendance(null);
+        const attendanceRes = await api.get("/technician/daily-status");
+        if (attendanceRes.data.success && attendanceRes.data.checkedIn) {
+          setDailyAttendance(attendanceRes.data.data);
+        } else {
+          setDailyAttendance(null);
+        }
+      } catch {
+        setDailyAttendance(null);
       }
 
-      console.log('📊 Dashboard Response:', JSON.stringify(response.data, null, 2));
+      console.log(
+        "📊 Dashboard Response:",
+        JSON.stringify(response.data, null, 2),
+      );
+
       if (response.data.data) {
-        // Calculate aggregations if backend doesn't provide them yet
         const data = response.data.data;
         if (data.actionCounts) {
-           const counts = data.actionCounts;
-           // Aggregate for Preventive if not present
-           if (counts.preventive === undefined) {
-             counts.preventive = (counts.generator || 0) + (counts.cleaning || 0) + (counts.power_cabinet || 0) + (counts.grid || 0) + (counts.shelter || 0);
-           }
-           // Use raw fuel_refill for refueling if not present
-           if (counts.refueling === undefined) {
-             counts.refueling = counts.fuel_refill || 0;
-           }
-           // Corrective is pending - use 0 or some other metric if available, for now 0 is safe
-           if (counts.corrective === undefined) {
-             counts.corrective = 0; // Needs backend support
-           }
+          const counts = data.actionCounts;
+          if (counts.preventive === undefined) {
+            counts.preventive =
+              (counts.generator || 0) +
+              (counts.cleaning || 0) +
+              (counts.power_cabinet || 0) +
+              (counts.grid || 0) +
+              (counts.shelter || 0);
+          }
+          if (counts.refueling === undefined) {
+            counts.refueling = counts.fuel_refill || 0;
+          }
+          if (counts.corrective === undefined) {
+            counts.corrective = 0;
+          }
+          // if (isAcTechnician) {
+          //   counts.preventive = (counts.cleaning || 0) + (counts.shelter || 0);
+          //   counts.refueling = 0;
+          //   counts.corrective = 0;
+          // }
+          // if (isFuelTechnician) {
+          //   counts.preventive = 0;
+          //   counts.corrective = 0;
+          //   // refueling stays as-is
+          // }
+          if (isAcTechnician) {
+            counts.preventive = (counts.cleaning || 0) + (counts.shelter || 0);
+            counts.refueling = 0;
+            counts.corrective = 0;
+          }
+          if (isFuelTechnician) {
+            counts.preventive = counts.fuel_refill || 0;
+            counts.corrective = 0;
+          }
         }
         setStats(data);
       }
     } catch (error: any) {
-      console.error('Fetch dashboard error', error);
+      console.error("Fetch dashboard error", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -163,12 +216,15 @@ export default function Dashboard() {
   }, []);
 
   const currentDate = new Date();
-  const formattedDate = currentDate.toLocaleDateString('en-US', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  });
+  const formattedDate = currentDate.toLocaleDateString(
+    i18n.language === "fr" ? "fr-FR" : "en-US",
+    {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    },
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -178,111 +234,178 @@ export default function Dashboard() {
   const handleCheckIn = async () => {
     setLoading(true);
     try {
-        const res = await api.post('/technician/daily-check-in', { });
-        if (res.data.success) {
-            setDailyAttendance(res.data.data);
-            alert('Checked in successfully!');
-            fetchDashboard();
-        }
+      const res = await api.post("/technician/daily-check-in", {});
+      if (res.data.success) {
+        setDailyAttendance(res.data.data);
+        alert("Checked in successfully!");
+        fetchDashboard();
+      }
     } catch (error) {
-        console.error('Check in failed', error);
-        alert('Check in failed');
+      console.error("Check in failed", error);
+      alert("Check in failed");
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
   const navigateToSiteSelection = (type: string) => {
-    // Corrective maintenance goes directly to parts (no assignment required)
-    if (type === 'corrective') {
-      router.push({ pathname: '/(technician)/parts' });
+    if (type === "corrective") {
+      router.push({ pathname: "/(technician)/parts" });
       return;
     }
-
     router.push({
-      pathname: '/(technician)/select-site',
-      params: { requiredAction: type }
+      pathname: "/(technician)/select-site",
+      params: { requiredAction: type },
     });
   };
 
   return (
     <SafeAreaView style={styles.container}>
-       <LoadingOverlay visible={loading} />
-       <ScrollView
+      <LanguageSwitcher />
+      <LoadingOverlay visible={loading} />
+      <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
         showsVerticalScrollIndicator={false}
       >
         {/* Header Section */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Hi, {user?.fullName?.split(' ')[0]}</Text>
+            <Text style={styles.greeting}>
+              {t("hi")}, {user?.fullName?.split(" ")[0]}
+            </Text>
             <Text style={styles.date}>{formattedDate}</Text>
           </View>
         </View>
 
         {/* Daily Attendance Section */}
         {dailyAttendance ? (
-            <View style={{ backgroundColor: 'white', padding: 16, borderRadius: 12, marginBottom: 20, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 }}> 
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                    <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
-                    <Text style={{ marginLeft: 8, fontSize: 18, fontWeight: 'bold', color: Colors.text }}>Checked In</Text>
-                </View>
-                <Text style={{ color: Colors.gray }}>
-                    You are checked in for today at {new Date(dailyAttendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </Text>
+          <View
+            style={{
+              backgroundColor: Colors.surface,
+              padding: 16,
+              borderRadius: 12,
+              marginBottom: 20,
+              elevation: 2,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.1,
+              shadowRadius: 2,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <Ionicons
+                name="checkmark-circle"
+                size={24}
+                color={Colors.success}
+              />
+              <Text
+                style={{
+                  marginLeft: 8,
+                  fontSize: 18,
+                  fontWeight: "bold",
+                  color: Colors.text,
+                }}
+              >
+                {t("checked_in")}
+              </Text>
             </View>
+            <Text style={{ color: Colors.textSecondary }}>
+              {t("checked_in_for_today_at", {
+                time: new Date(dailyAttendance.checkInTime).toLocaleTimeString(
+                  [],
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  },
+                ),
+              })}
+            </Text>
+          </View>
         ) : (
-             <TouchableOpacity 
-                style={styles.checkInButton}
-                onPress={handleCheckIn}
-             >
-                <View style={styles.checkInIconContainer}>
-                    <Ionicons name="location" size={24} color={Colors.white} />
-                </View>
-                <View>
-                    <Text style={styles.checkInTitle}>Check In for Today</Text>
-                    <Text style={styles.checkInSubtitle}>Tap to mark your attendance</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={24} color={Colors.white} style={{ marginLeft: 'auto' }} />
-             </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.checkInButton}
+            onPress={handleCheckIn}
+          >
+            <View style={styles.checkInIconContainer}>
+              <Ionicons name="location" size={24} color={Colors.surface} />
+            </View>
+            <View>
+              <Text style={styles.checkInTitle}>{t("check_in_for_today")}</Text>
+              <Text style={styles.checkInSubtitle}>
+                {t("tap_to_mark_attendance")}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={24}
+              color={Colors.surface}
+              style={{ marginLeft: "auto" }}
+            />
+          </TouchableOpacity>
         )}
 
         {/* Summary Section */}
         <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Today's Summary</Text>
+          <Text style={styles.sectionTitle}>{t("todays_summary")}</Text>
         </View>
         <View style={styles.summaryContainer}>
-          <SummaryCard 
-            label="Pending" 
-            count={stats?.pendingTasks || 0} 
-            type="pending" 
+          {/* <SummaryCard
+            label={"pending"}
+            count={stats?.pendingTasks || 0}
+            type="pending"
+            style={{ flex: 1, marginRight: 8 }}
+          /> */}
+          <SummaryCard
+            label={"scheduled"}
+            count={stats?.scheduledTasks || 0}
+            type="neutral"
             style={{ flex: 1, marginRight: 8 }}
           />
-          <SummaryCard 
-            label="In Progress" 
-            count={stats?.inProgressTasks || 0} 
-            type="neutral" 
+          <SummaryCard
+            label={"in_progress"}
+            count={stats?.inProgressTasks || 0}
+            type="neutral"
             style={{ flex: 1, marginRight: 8 }}
           />
-           <SummaryCard 
-            label="Completed" 
-            count={stats?.completedThisMonth || 0} 
-            type="completed" 
+          {/* <SummaryCard
+            label={"approved"}
+            count={stats?.approvedTasks || 0}
+            type="neutral"
+            style={{ flex: 1, marginRight: 8 }}
+          />
+          <SummaryCard
+            label={"draft"}
+            count={stats?.draftTasks || 0}
+            type="neutral"
+            style={{ flex: 1, marginRight: 8 }}
+          /> */}
+          <SummaryCard
+            label={"completed"}
+            count={stats?.completedTasks || 0}
+            type="completed"
             style={{ flex: 1 }}
           />
         </View>
 
-        {/* Quick Actions Section (Updated) */}
+        {/* Quick Actions Section */}
         <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <Text style={styles.sectionTitle}>{t("quick_actions")}</Text>
         </View>
-        
+
         <View style={styles.actionsContainer}>
           <QuickActionCard
-            title="SYNC NOW"
-            subtitle="Upload offline visits"
-            badgeText="Manual sync"
+            title={"sync_now"}
+            subtitle={"upload_offline_visits"}
+            badgeText={"manual_sync"}
             icon="cloud-upload"
             color={Colors.success}
             onPress={async () => {
@@ -290,38 +413,75 @@ export default function Dashboard() {
               await fetchDashboard();
             }}
           />
-          <QuickActionCard
-            title="PREVENTIVE MAINTENANCE"
-            subtitle="Scheduled Checks"
-            badgeText={stats?.actionCounts?.preventive ? `${stats.actionCounts.preventive} Assigned` : "0 Assigned"}
-            icon="clipboard-check"
-            color={Colors.primary}
-            onPress={() => navigateToSiteSelection('preventive')}
-          />
-          <QuickActionCard
-            title="REFUELING MANAGEMENT"
-            subtitle="Fuel Log & Tank Level"
-            badgeText={stats?.actionCounts?.refueling ? `${stats.actionCounts.refueling} Assigned` : "0 Assigned"}
-            icon="water"
-            color={Colors.warning}
-            onPress={() => router.push('/(technician)/refueling')}
-          />
-           <QuickActionCard
-            title="CORRECTIVE MAINTENANCE"
-            subtitle="Repairs & Issues"
-            badgeText={stats?.actionCounts?.corrective ? `${stats.actionCounts.corrective} Assigned` : "0 Assigned"}
-            icon="construct"
-            color={Colors.error}
-            onPress={() => navigateToSiteSelection('corrective')}
-          />
-
+          {!isFuelTechnician && (
+            <QuickActionCard
+              title={"preventive_maintenance"}
+              subtitle={"scheduled_checks"}
+              badgeText={{
+                key: "assigned_count",
+                count: stats?.actionCounts?.preventive || 0,
+              }}
+              icon="clipboard-check"
+              color={Colors.primary}
+              onPress={() => navigateToSiteSelection("preventive")}
+            />
+          )}
+          {!isAcTechnician && (
+            <QuickActionCard
+              title={"refueling_management"}
+              subtitle={"fuel_log_tank_level"}
+              badgeText={{
+                key: "assigned_count",
+                count: stats?.actionCounts?.refueling || 0,
+              }}
+              icon="water"
+              color={Colors.warning}
+              onPress={() => router.push("/(technician)/refueling")}
+            />
+          )}
+          {!isAcTechnician && !isFuelTechnician && (
+            <QuickActionCard
+              title={"corrective_maintenance"}
+              subtitle={"repairs_issues"}
+              badgeText={{
+                key: "assigned_count",
+                count: stats?.actionCounts?.corrective || 0,
+              }}
+              icon="construct"
+              color={Colors.error}
+              onPress={() => navigateToSiteSelection("corrective")}
+            />
+          )}
+          {!isFuelTechnician && (
+            <QuickActionCard
+              title={"site_audit"}
+              subtitle={"audit_a_site"}
+              badgeText={"new"}
+              icon="search"
+              color={Colors.warning}
+              onPress={() => router.push("/(technician)/select-site-audit")}
+            />
+          )}
+          {/* HSE Inspection — hidden for Fuel users */}
+          {!isFuelTechnician && (
+            <QuickActionCard
+              title={"hse_inspection"}
+              subtitle={"site_integrity_checklist"}
+              badgeText={"hse"}
+              icon="shield-checkmark"
+              color="#c0392b"
+              onPress={() => router.push("/(technician)/select-site-hse")}
+            />
+          )}
         </View>
-
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+// ─────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -333,43 +493,43 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 24,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   greeting: {
     fontSize: 28,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: Colors.text,
     marginBottom: 4,
   },
   date: {
     fontSize: 14,
     color: Colors.textSecondary,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   sectionHeader: {
     marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: Colors.text,
   },
   summaryContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 32,
   },
   actionsContainer: {
     marginBottom: 24,
   },
   checkInButton: {
-    backgroundColor: Colors.success, // Use success green for starting
+    backgroundColor: Colors.success,
     borderRadius: 16,
     padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 24,
     shadowColor: Colors.success,
     shadowOffset: { width: 0, height: 4 },
@@ -381,19 +541,19 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(255,255,255,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 16,
   },
   checkInTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.white,
+    fontWeight: "bold",
+    color: Colors.surface,
     marginBottom: 4,
   },
   checkInSubtitle: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
+    color: "rgba(255,255,255,0.8)",
   },
 });

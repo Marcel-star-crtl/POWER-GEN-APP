@@ -1,13 +1,20 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, TextInput } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
-import { FontAwesome5 } from '@expo/vector-icons';
-import { format, parseISO } from 'date-fns';
-import { Colors } from '../../constants/Colors';
-import { Card } from '../../components/ui/Card';
-import { api } from '../../services/api';
-import { LoadingOverlay } from '../../components/ui/LoadingOverlay';
+import { FontAwesome5 } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Card } from "../../components/ui/Card";
+import { LoadingOverlay } from "../../components/ui/LoadingOverlay";
+import { Colors } from "../../constants/Colors";
+import { api } from "../../services/api";
 
 interface SiteItem {
   IHS_ID_SITE: string;
@@ -17,31 +24,36 @@ interface SiteItem {
     date: string | Date;
     type: string;
     priority: string;
-    status: 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'approved';
+    status: "pending" | "scheduled" | "in_progress" | "completed" | "approved";
   };
 }
 
-interface GroupedSites {
-  [date: string]: SiteItem[];
-}
-
 export default function SelectSite() {
-  const params = useLocalSearchParams<{ nextPath?: string; requiredAction?: string }>();
+  const { t } = useTranslation();
+  const params = useLocalSearchParams<{
+    nextPath?: string;
+    requiredAction?: string;
+  }>();
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'in_progress' | 'completed'>('pending');
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "pending" | "in_progress" | "completed"
+  >("pending");
 
   useEffect(() => {
     const fetchSites = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/technician/sites');
+        const response = await api.get("/technician/sites");
         const list: SiteItem[] = response?.data?.data || [];
         setSites(list);
-        console.log('✅ SelectSite loaded sites:', list.length);
+        console.log("✅ SelectSite loaded sites:", list.length);
       } catch (error: any) {
-        console.error('❌ Failed to load sites:', error.response?.data || error.message);
+        console.error(
+          "❌ Failed to load sites:",
+          error.response?.data || error.message,
+        );
       } finally {
         setLoading(false);
       }
@@ -49,146 +61,116 @@ export default function SelectSite() {
     fetchSites();
   }, []);
 
+  // Compute scheduledSites and allSites separately
+  const scheduledSites = useMemo(() => {
+    return sites.filter((s) => {
+      const status = s.next_maintenance?.status?.toLowerCase();
+      const type = s.next_maintenance?.type?.toUpperCase();
+      // Exclude refueling (RF) from preventive maintenance
+      if (type === "RF") return false;
+      return (
+        status === "pending" || status === "scheduled" || status === "approved"
+      );
+    });
+  }, [sites]);
+
   const filteredSites = useMemo(() => {
-    let result = sites;
-    
-    // Filter by status (check actual maintenance status)
-    result = result.filter(s => {
-      if (!s.next_maintenance) return false;
-      
-      const maintenanceStatus = s.next_maintenance.status?.toLowerCase() || '';
-      
-      if (statusFilter === 'pending') {
-        return ['pending', 'scheduled', 'approved'].includes(maintenanceStatus);
-      } else if (statusFilter === 'in_progress') {
-        return maintenanceStatus === 'in_progress';
-      } else if (statusFilter === 'completed') {
-        return ['completed', 'pending_approval'].includes(maintenanceStatus);
+    const q = query.trim().toLowerCase();
+
+    // If searching, skip status filter and search all sites
+    if (q) {
+      return sites.filter(
+        (s) =>
+          s.Site_Name?.toLowerCase().includes(q) ||
+          s.IHS_ID_SITE?.toLowerCase().includes(q),
+      );
+    }
+
+    // No query: apply status filter as before
+    return sites.filter((s) => {
+      const status = s.next_maintenance?.status?.toLowerCase();
+      const type = s.next_maintenance?.type?.toUpperCase();
+      if (type === "RF") return false;
+      if (statusFilter === "pending") {
+        return (
+          status === "pending" ||
+          status === "scheduled" ||
+          status === "approved"
+        );
+      } else if (statusFilter === "in_progress") {
+        return status === "in_progress";
+      } else if (statusFilter === "completed") {
+        return status === "completed" || status === "pending_approval";
       }
-      
       return false;
     });
-    
-    // Filter by required action if present
-    if (params.requiredAction) {
-       const reqAction = params.requiredAction!.toLowerCase().trim();
-       
-       if (reqAction === 'check-in') {
-          // For check-in, allow any site
-          const q = query.trim().toLowerCase();
-          if (!q) return sites;
-          return sites.filter(s =>
-            s.Site_Name?.toLowerCase().includes(q) || s.IHS_ID_SITE?.toLowerCase().includes(q)
-          );
-       }
-       
-       result = result.filter(s => {
-          if (!s.next_maintenance?.type) return false;
-          
-          const type = s.next_maintenance.type.toUpperCase();
-          
-          if (reqAction === 'preventive') {
-              return type.includes('PM');
-          } else if (reqAction === 'refueling') {
-              return type.includes('RF');
-          } else if (reqAction === 'corrective') {
-              return type.includes('END');
-          }
-          
-          return false;
-       });
-    }
+  }, [sites, query, statusFilter]);
 
-    const q = query.trim().toLowerCase();
-    if (!q) return result;
-    
-    return result.filter(s =>
-      s.Site_Name?.toLowerCase().includes(q) || s.IHS_ID_SITE?.toLowerCase().includes(q)
-    );
-  }, [sites, query, params.requiredAction, statusFilter]);
+  // const handleSelect = (site: SiteItem) => {
+  //   console.log(
+  //     "🏢 Selected site:",
+  //     site.Site_Name,
+  //     site.IHS_ID_SITE,
+  //     "Maintenance ID:",
+  //     site.next_maintenance?.maintenance_id,
+  //   );
 
-  // Group sites by maintenance date
-  const groupedByDate = useMemo(() => {
-    const grouped: GroupedSites = {};
-    
-    filteredSites.forEach(site => {
-      let dateKey = 'No Date Scheduled';
-      
-      if (site.next_maintenance?.date) {
-        try {
-          const date = typeof site.next_maintenance.date === 'string' 
-            ? parseISO(site.next_maintenance.date) 
-            : new Date(site.next_maintenance.date);
-          dateKey = format(date, 'MMM dd, yyyy');
-        } catch (error) {
-          console.warn('Invalid date:', site.next_maintenance.date);
-        }
-      }
-      
-      if (!grouped[dateKey]) {
-        grouped[dateKey] = [];
-      }
-      grouped[dateKey].push(site);
-    });
-    
-    return grouped;
-  }, [filteredSites]);
+  //   const maintenanceId = site.next_maintenance?.maintenance_id || "";
 
-  const sortedDates = useMemo(() => {
-    return Object.keys(groupedByDate).sort((a, b) => {
-      if (a === 'No Date Scheduled') return 1;
-      if (b === 'No Date Scheduled') return -1;
-      try {
-        return new Date(a).getTime() - new Date(b).getTime();
-      } catch {
-        return 0;
-      }
-    });
-  }, [groupedByDate]);
+  //   // Always route through activate-site to begin the workflow
+  //   router.push({
+  //     pathname: "/(technician)/maintenance-flow/activate-site",
+  //     params: {
+  //       maintenanceId,
+  //       siteId: site.IHS_ID_SITE,
+  //       siteName: site.Site_Name,
+  //       visitDate: site.next_maintenance?.date
+  //         ? String(site.next_maintenance.date)
+  //         : "",
+  //     },
+  //   });
+  // };
 
   const handleSelect = (site: SiteItem) => {
-    console.log('🏢 Selected site:', site.Site_Name, site.IHS_ID_SITE, 'Maintenance ID:', site.next_maintenance?.maintenance_id);
-    
-    const maintenanceId = site.next_maintenance?.maintenance_id || '';
-    
+    const maintenanceId = site.next_maintenance?.maintenance_id || "";
+
+    // If called from a non-maintenance flow (nextPath param present), honour it
     if (params.nextPath) {
-        // Construct the next URL with site params
-        // Decode nextPath in case it was encoded
-        const basePath = decodeURIComponent(params.nextPath);
-        const separator = basePath.includes('?') ? '&' : '?';
-        let target = `${basePath}${separator}siteId=${encodeURIComponent(site.IHS_ID_SITE)}&siteName=${encodeURIComponent(site.Site_Name)}`;
-        if (maintenanceId) {
-          target += `&maintenanceId=${encodeURIComponent(maintenanceId)}`;
-        }
-        console.log('🔗 Redirecting to:', target);
-        router.push(target);
-    } else {
-        // If coming from quick action
-        const reqAction = params.requiredAction || 'preventive';
-        
-        // Navigate to Checklist screen
-        let target = `/(technician)/maintenance/checklist?siteId=${encodeURIComponent(site.IHS_ID_SITE)}&siteName=${encodeURIComponent(site.Site_Name)}&type=${reqAction}`;
-        
-        if (maintenanceId) {
-           target += `&maintenanceId=${encodeURIComponent(maintenanceId)}`;
-        }
-        
-        console.log('🔗 Redirecting to CheckList:', target);
-        router.push(target);
+      const basePath = decodeURIComponent(params.nextPath);
+      const separator = basePath.includes("?") ? "&" : "?";
+      let target = `${basePath}${separator}siteId=${encodeURIComponent(site.IHS_ID_SITE)}&siteName=${encodeURIComponent(site.Site_Name)}`;
+      if (maintenanceId)
+        target += `&maintenanceId=${encodeURIComponent(maintenanceId)}`;
+      router.push(target);
+      return;
     }
+
+    // Default: always route through activate-site for the maintenance workflow
+    router.push({
+      pathname: "/(technician)/maintenance-flow/activate-site",
+      params: {
+        maintenanceId,
+        siteId: site.IHS_ID_SITE,
+        siteName: site.Site_Name,
+        visitDate: site.next_maintenance?.date
+          ? String(site.next_maintenance.date)
+          : "",
+      },
+    });
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <LoadingOverlay visible={loading} />
-      
+
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
           <FontAwesome5 name="arrow-left" size={20} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-           {params.requiredAction ? `Select Site` : 'Select Site'}
-        </Text>
+        <Text style={styles.headerTitle}>{t("select_site")}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -196,90 +178,173 @@ export default function SelectSite() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Search by name or ID"
+          placeholder={t("search_by_name_or_id")}
           placeholderTextColor={Colors.textSecondary}
           style={styles.searchInput}
         />
       </View>
 
       <View style={styles.filterTabs}>
-        <TouchableOpacity 
-          style={[styles.filterTab, statusFilter === 'pending' && styles.filterTabActive]}
-          onPress={() => setStatusFilter('pending')}
+        <TouchableOpacity
+          style={[
+            styles.filterTab,
+            statusFilter === "pending" && styles.filterTabActive,
+          ]}
+          onPress={() => setStatusFilter("pending")}
         >
-          <Text style={[styles.filterTabText, statusFilter === 'pending' && styles.filterTabTextActive]}>
-            Pending
+          <Text
+            style={[
+              styles.filterTabText,
+              statusFilter === "pending" && styles.filterTabTextActive,
+            ]}
+          >
+            {t("pending")}
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.filterTab, statusFilter === 'in_progress' && styles.filterTabActive]}
-          onPress={() => setStatusFilter('in_progress')}
+        <TouchableOpacity
+          style={[
+            styles.filterTab,
+            statusFilter === "in_progress" && styles.filterTabActive,
+          ]}
+          onPress={() => setStatusFilter("in_progress")}
         >
-          <Text style={[styles.filterTabText, statusFilter === 'in_progress' && styles.filterTabTextActive]}>
-            In Progress
+          <Text
+            style={[
+              styles.filterTabText,
+              statusFilter === "in_progress" && styles.filterTabTextActive,
+            ]}
+          >
+            {t("in_progress")}
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.filterTab, statusFilter === 'completed' && styles.filterTabActive]}
-          onPress={() => setStatusFilter('completed')}
+        <TouchableOpacity
+          style={[
+            styles.filterTab,
+            statusFilter === "completed" && styles.filterTabActive,
+          ]}
+          onPress={() => setStatusFilter("completed")}
         >
-          <Text style={[styles.filterTabText, statusFilter === 'completed' && styles.filterTabTextActive]}>
-            Completed
+          <Text
+            style={[
+              styles.filterTabText,
+              statusFilter === "completed" && styles.filterTabTextActive,
+            ]}
+          >
+            {t("completed")}
           </Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={filteredSites.length === 0 ? styles.emptyContainer : undefined}>
+      <ScrollView
+        contentContainerStyle={
+          filteredSites.length === 0 ? styles.emptyContainer : undefined
+        }
+      >
         {filteredSites.length === 0 && !loading ? (
-          <Text style={styles.emptyText}>No assigned sites found for this action.</Text>
+          <Text style={styles.emptyText}>{t("no_sites_found")}</Text>
         ) : (
-          sortedDates.map((dateKey) => (
-            <View key={dateKey} style={styles.dateSection}>
-              <View style={styles.dateHeader}>
-                <View style={styles.dateInfo}>
-                  <FontAwesome5 name="calendar-alt" size={16} color={Colors.primary} style={styles.dateIcon} />
-                  <Text style={styles.dateText}>{dateKey}</Text>
+          // Group sites by scheduled_date if available, otherwise fallback to date (YYYY-MM-DD)
+          Object.entries(
+            filteredSites.reduce(
+              (acc, site) => {
+                const schedDate = site.next_maintenance?.scheduled_date;
+                const mainDate = site.next_maintenance?.date;
+                let dateObj = null;
+                if (schedDate) {
+                  dateObj =
+                    typeof schedDate === "string"
+                      ? new Date(schedDate)
+                      : schedDate;
+                } else if (mainDate) {
+                  dateObj =
+                    typeof mainDate === "string"
+                      ? new Date(mainDate)
+                      : mainDate;
+                }
+                // Format date as YYYY-MM-DD
+                const dateKey = dateObj
+                  ? dateObj.toLocaleDateString("en-CA", {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                    })
+                  : "No Date";
+                if (!acc[dateKey]) acc[dateKey] = [];
+                acc[dateKey].push(site);
+                return acc;
+              },
+              /** @type {Record<string, SiteItem[]>} */ {},
+            ),
+          )
+            .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
+            .map(([dateKey, sitesForDate]) => (
+              <View key={dateKey} style={styles.dateSection}>
+                <View style={styles.dateHeader}>
+                  <View style={styles.dateInfo}>
+                    <FontAwesome5
+                      name="calendar-alt"
+                      size={18}
+                      color={Colors.primary}
+                      style={styles.dateIcon}
+                    />
+                    <Text style={styles.dateText}>
+                      {/* Format date as e.g. Feb 04, 2026 */}
+                      {dateKey !== "No Date"
+                        ? new Date(dateKey).toLocaleDateString("en-US", {
+                            year: "numeric",
+                            month: "short",
+                            day: "2-digit",
+                          })
+                        : t("no_date")}
+                    </Text>
+                  </View>
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>
+                      {sitesForDate.length}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.countBadge}>
-                  <Text style={styles.countBadgeText}>{groupedByDate[dateKey].length}</Text>
-                </View>
-              </View>
-
-              {groupedByDate[dateKey].map((item) => (
-                <TouchableOpacity key={item.IHS_ID_SITE} onPress={() => handleSelect(item)}>
-                  <Card style={styles.card}>
-                    <View style={styles.cardHeader}>
-                      <Text style={styles.siteName}>{item.Site_Name}</Text>
-                      <FontAwesome5 name="chevron-right" size={16} color={Colors.textSecondary} />
-                    </View>
-                    <Text style={styles.siteId}>{item.IHS_ID_SITE}</Text>
-                    {item.next_maintenance?.type && (
+                {sitesForDate.map((item) => (
+                  <TouchableOpacity
+                    key={item.IHS_ID_SITE}
+                    onPress={() => handleSelect(item)}
+                  >
+                    <Card style={styles.card}>
+                      <View style={styles.cardHeader}>
+                        <Text style={styles.siteName}>{item.Site_Name}</Text>
+                        <FontAwesome5
+                          name="chevron-right"
+                          size={16}
+                          color={Colors.textSecondary}
+                        />
+                      </View>
+                      <Text style={styles.siteId}>{item.IHS_ID_SITE}</Text>
                       <View style={styles.maintenanceRow}>
-                        <Text style={styles.maintenanceType}>
-                          {item.next_maintenance.type}
-                        </Text>
-                        {item.next_maintenance.priority && (
-                          <View style={[
-                            styles.priorityBadge,
-                            {
-                              backgroundColor: 
-                                item.next_maintenance.priority === 'high' ? '#FF6B6B' :
-                                item.next_maintenance.priority === 'medium' ? '#FFA500' :
-                                '#4CAF50'
-                            }
-                          ]}>
+                        {/* Maintenance Type */}
+                        {item.next_maintenance?.type && (
+                          <Text style={styles.maintenanceType}>
+                            {item.next_maintenance.type}
+                          </Text>
+                        )}
+                        {/* Priority Badge */}
+                        {item.next_maintenance?.priority && (
+                          <View
+                            style={[
+                              styles.priorityBadge,
+                              { backgroundColor: Colors.warning },
+                            ]}
+                          >
                             <Text style={styles.priorityText}>
-                              {item.next_maintenance.priority.toUpperCase()}
+                              {item.next_maintenance.priority?.toUpperCase()}
                             </Text>
                           </View>
                         )}
                       </View>
-                    )}
-                  </Card>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))
+                    </Card>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))
         )}
       </ScrollView>
     </SafeAreaView>
@@ -292,9 +357,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -304,13 +369,13 @@ const styles = StyleSheet.create({
   backButton: {
     width: 40,
     height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 8,
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: "700",
     color: Colors.text,
   },
   searchRow: {
@@ -327,7 +392,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   filterTabs: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 8,
@@ -340,7 +405,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    alignItems: 'center',
+    alignItems: "center",
   },
   filterTabActive: {
     backgroundColor: Colors.primary,
@@ -348,33 +413,33 @@ const styles = StyleSheet.create({
   },
   filterTabText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
     color: Colors.textSecondary,
   },
   filterTabTextActive: {
-    color: '#FFF',
+    color: "#FFF",
   },
   dateSection: {
     marginBottom: 24,
   },
   dateHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 12,
   },
   dateInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   dateIcon: {
     marginRight: 8,
   },
   dateText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     color: Colors.text,
   },
   countBadge: {
@@ -384,9 +449,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   countBadgeText: {
-    color: '#FFF',
+    color: "#FFF",
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   card: {
     marginHorizontal: 16,
@@ -394,13 +459,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
   },
   cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   siteName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     color: Colors.text,
   },
   siteId: {
@@ -410,18 +475,18 @@ const styles = StyleSheet.create({
   },
   maintenanceRow: {
     marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   maintenanceType: {
     fontSize: 12,
     color: Colors.primary,
-    backgroundColor: Colors.primary + '20',
+    backgroundColor: Colors.primary + "20",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   priorityBadge: {
     paddingHorizontal: 8,
@@ -429,15 +494,15 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   priorityText: {
-    color: '#FFF',
+    color: "#FFF",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   emptyContainer: {
     paddingTop: 32,
   },
   emptyText: {
-    textAlign: 'center',
+    textAlign: "center",
     color: Colors.textSecondary,
   },
 });

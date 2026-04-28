@@ -1,15 +1,15 @@
 export const Colors = {
-  primary: '#2563eb', // blue-600
-  primaryLight: '#dbeafe', // blue-100
-  secondary: '#475569', // slate-600
-  success: '#16a34a', // green-600
-  warning: '#ca8a04', // yellow-600
-  danger: '#dc2626', // red-600
-  error: '#dc2626', // Alias for danger
-  background: '#f8fafc', // slate-50
-  surface: '#ffffff',
-  text: '#0f172a', // slate-900
-  textSecondary: '#64748b', // slate-500
-  border: '#e2e8f0', // slate-200
-  lightGray: '#f1f5f9', // slate-100
+  primary: '#e53935', // Grato Red (logo)
+  primaryLight: '#ffcdd2', // Light Red (tint from logo)
+  secondary: '#222222', // Dark Gray/Black (logo text)
+  success: '#388e3c', // Green (standard success)
+  warning: '#fbc02d', // Yellow (standard warning)
+  danger: '#b71c1c', // Dark Red (logo shadow/accent)
+  error: '#b71c1c', // Alias for danger
+  background: '#f4f4f4', // Light Gray (logo background)
+  surface: '#ffffff', // White
+  text: '#222222', // Strong text (logo text)
+  textSecondary: '#757575', // Muted gray
+  border: '#e0e0e0', // Light border
+  lightGray: '#f4f4f4', // Light Gray (logo background)
 };

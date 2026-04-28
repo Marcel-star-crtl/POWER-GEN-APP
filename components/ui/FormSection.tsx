@@ -31,6 +31,7 @@ export const FormSection: React.FC<FormSectionProps> = ({
     }
   };
 
+  const { t } = require('react-i18next').useTranslation();
   return (
     <View style={styles.container}>
       <TouchableOpacity 
@@ -45,7 +46,7 @@ export const FormSection: React.FC<FormSectionProps> = ({
               <Ionicons name={icon} size={20} color={Colors.primary} />
             </View>
           )}
-          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.title}>{t(title, title)}</Text>
         </View>
         {collapsible && (
           <Ionicons 

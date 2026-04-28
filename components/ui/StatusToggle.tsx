@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next'; // ✅ proper import
 import { Colors } from '../../constants/Colors';
 
 type WarningLevel = 'critical' | 'warning' | 'info' | 'none';
@@ -28,6 +29,8 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
   okLabel = 'OK / Yes',
   nokLabel = 'NOK / No',
 }) => {
+  const { t } = useTranslation(); // ✅ hook at the top of the component, reads from I18nextProvider
+
   const isNOK = value === false;
 
   const getWarningConfig = () => {
@@ -66,7 +69,7 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
   return (
     <View style={styles.container}>
       <Text style={styles.label}>
-        {label}
+        {t(label, label)}
         {required && <Text style={styles.required}> *</Text>}
       </Text>
 
@@ -79,7 +82,7 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
           onPress={() => onChange(true)}
         >
           {value === true && <Ionicons name="checkmark" size={18} color="white" style={styles.icon} />}
-          <Text style={[styles.buttonText, value === true && styles.buttonTextSelected]}>{okLabel}</Text>
+          <Text style={[styles.buttonText, value === true && styles.buttonTextSelected]}>{t(okLabel, okLabel)}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -90,7 +93,7 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
           onPress={() => onChange(false)}
         >
           {value === false && <Ionicons name="close" size={18} color="white" style={styles.icon} />}
-          <Text style={[styles.buttonText, value === false && styles.buttonTextSelected]}>{nokLabel}</Text>
+          <Text style={[styles.buttonText, value === false && styles.buttonTextSelected]}>{t(nokLabel, nokLabel)}</Text>
         </TouchableOpacity>
       </View>
 
@@ -98,18 +101,18 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
         <View style={[styles.warningContainer, { backgroundColor: warning.bg, borderLeftColor: warning.color }]}>
           <View style={styles.warningHeader}>
             <Ionicons name={warning.icon} size={20} color={warning.color} />
-            <Text style={[styles.warningTitle, { color: warning.color }]}>{warning.title}</Text>
+            <Text style={[styles.warningTitle, { color: warning.color }]}>{t(warning.title, warning.title)}</Text>
           </View>
-          <Text style={styles.warningMessage}>{warning.message}</Text>
+          <Text style={styles.warningMessage}>{t(warning.message, warning.message)}</Text>
           
           {onCommentChange && (
             <View style={styles.commentContainer}>
-              <Text style={styles.commentLabel}>Comments / Observations (optional)</Text>
+              <Text style={styles.commentLabel}>{t('statusToggle.commentsLabel', 'Comments / Observations (optional)')}</Text>
               <TextInput
                 style={styles.commentInput}
                 multiline
                 numberOfLines={3}
-                placeholder="Describe the issue..."
+                placeholder={t('statusToggle.commentsPlaceholder', 'Describe the issue...')}
                 value={comment}
                 onChangeText={onCommentChange}
                 textAlignVertical="top"

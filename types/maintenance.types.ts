@@ -114,6 +114,28 @@ export interface Maintenance {
   site_id: string;
   site_name?: string;
   visit_reference: string; // Generated when visit is submitted
+
+  site_entries?: Array<{
+    technician?: {
+      _id?: string;
+      fullName?: string;
+      email?: string;
+    } | string;
+    site_id?: string;
+    entry_time?: Date | string;
+    exit_time?: Date | string;
+    entry_location?: {
+      latitude?: number;
+      longitude?: number;
+      address?: string;
+    };
+    exit_location?: {
+      latitude?: number;
+      longitude?: number;
+      address?: string;
+    };
+    notes?: string;
+  }>;
   
   equipment_checks?: any; // Detailed checklists
   

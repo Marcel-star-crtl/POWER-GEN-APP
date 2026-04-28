@@ -1,15 +1,26 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Image, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { Input } from '../../components/ui/Input';
-import { Button } from '../../components/ui/Button';
-import { useAuth } from '../../context/AuthContext';
-import { Colors } from '../../constants/Colors';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar } from "expo-status-bar";
+import { useState } from "react";
+import {
+    Image,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+import { Button } from "../../components/ui/Button";
+import { Input } from "../../components/ui/Input";
+import { Colors } from "../../constants/Colors";
+import { useAuth } from "../../context/AuthContext";
+
+import { useTranslation } from "react-i18next";
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const { signIn, loading, error } = useAuth();
+  const { t } = useTranslation();
 
   const handleLogin = async () => {
     try {
@@ -25,19 +36,30 @@ export default function Login() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.container}
     >
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Text style={styles.title}>PowerGen</Text>
-          <Text style={styles.subtitle}>Technician Portal</Text>
+          <Image
+            source={require("../../assets/logo.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={styles.title}>{t("login.title", "Grato")}</Text>
+          <Text style={styles.subtitle}>
+            {t("login.subtitle", "Technician Portal")}
+          </Text>
         </View>
 
         <View style={styles.form}>
-          <Text style={styles.welcome}>Welcome Back</Text>
-          <Text style={styles.instruction}>Sign in to access your tasks</Text>
+          <Text style={styles.welcome}>
+            {t("login.welcome", "Welcome Back")}
+          </Text>
+          <Text style={styles.instruction}>
+            {t("login.instruction", "Sign in to access your tasks")}
+          </Text>
 
           {error && (
             <View style={styles.errorContainer}>
@@ -46,8 +68,11 @@ export default function Login() {
           )}
 
           <Input
-            label="Email or Phone"
-            placeholder="technician@powergen.com / 080..."
+            label={t("login.emailLabel", "Email or Phone")}
+            placeholder={t(
+              "login.emailPlaceholder",
+              "technician@grato.com / 080...",
+            )}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -55,8 +80,8 @@ export default function Login() {
           />
 
           <Input
-            label="Password"
-            placeholder="••••••••"
+            label={t("login.passwordLabel", "Password")}
+            placeholder={t("login.passwordPlaceholder", "••••••••")}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -68,7 +93,7 @@ export default function Login() {
             size="lg"
             style={styles.loginButton}
           >
-            Sign In
+            {t("login.signInButton", "Sign In")}
           </Button>
         </View>
       </ScrollView>
@@ -83,16 +108,16 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     padding: 24,
   },
   header: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 48,
   },
   title: {
     fontSize: 32,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: Colors.primary,
   },
   subtitle: {
@@ -104,7 +129,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     padding: 24,
     borderRadius: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -112,18 +137,25 @@ const styles = StyleSheet.create({
   },
   welcome: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: Colors.text,
     marginBottom: 8,
+    textAlign: "center",
   },
   instruction: {
     fontSize: 16,
     color: Colors.textSecondary,
     marginBottom: 24,
+    textAlign: "center",
+  },
+  logo: {
+    width: 90,
+    height: 90,
+    marginBottom: 12,
   },
   errorContainer: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#fca5a5',
+    backgroundColor: "#fef2f2",
+    borderColor: "#fca5a5",
     borderWidth: 1,
     padding: 12,
     borderRadius: 8,
