@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,16 +7,14 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
-  ActivityIndicator,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
+import { FontAwesome5 } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { api } from '../../services/api';
+import { submitOrQueue } from '../../services/offlineApi';
 
 export default function RequestPartScreen() {
   const params = useLocalSearchParams<{ partId?: string; partName?: string }>();
@@ -25,7 +23,6 @@ export default function RequestPartScreen() {
   const [partId, setPartId] = useState(params.partId || '');
   const [partName, setPartName] = useState(params.partName || '');
   
-  // New Fields (simplified)
   const [quantity, setQuantity] = useState('1');
   const [requestedTime, setRequestedTime] = useState('');
   const [description, setDescription] = useState('');
@@ -55,11 +52,15 @@ export default function RequestPartScreen() {
         payload.requested_time = requestedTime;
       }
 
-      await api.post('/parts/requests', payload);
+      const result = await submitOrQueue('part_request', '/parts/requests', 'POST', payload);
 
-      Alert.alert('Success', 'Part request submitted successfully', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
+      Alert.alert(
+        'Success',
+        result.queued
+          ? 'No connection — request saved and will sync automatically.'
+          : 'Part request submitted successfully',
+        [{ text: 'OK', onPress: () => router.back() }],
+      );
     } catch (error: any) {
       console.error('Submit request error:', error);
       Alert.alert('Error', error.response?.data?.error || 'Failed to submit request');
@@ -72,8 +73,6 @@ export default function RequestPartScreen() {
     <View style={styles.fieldContainer}>
         <Text style={styles.label}>{label} <Text style={styles.required}>*</Text></Text>
         <TouchableOpacity style={styles.pickerButton} onPress={() => {
-            // In a real app, open a modal or picker. For now, just cycle or alerts
-            // Simple mock implementation:
             const nextIndex = (options.indexOf(value) + 1) % options.length;
             onSelect(options[nextIndex] || options[0]);
         }}>
@@ -82,7 +81,6 @@ export default function RequestPartScreen() {
             </Text>
             <FontAwesome5 name="chevron-down" size={14} color={Colors.textSecondary} />
         </TouchableOpacity>
-        {/* Helper Note for Demo */}
         <Text style={{fontSize: 10, color: Colors.textSecondary, marginTop: 4}}>* Tap to cycle options (Mock)</Text>
     </View>
   );
@@ -144,14 +142,14 @@ export default function RequestPartScreen() {
           </View>
         </Card>
 
-        {/* Photos removed - simplified form */}
-
         <Button 
-            title={loading ? "Submitting..." : "Submit Request"} 
             onPress={handleSubmit} 
             disabled={loading}
+            loading={loading}
             style={styles.submitButton}
-        />
+        >
+            {loading ? "Submitting..." : "Submit Request"}
+        </Button>
         <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
@@ -184,7 +182,7 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     marginBottom: 16,
-    backgroundColor: '#EFF6FF', // Light blue
+    backgroundColor: '#EFF6FF',
     borderWidth: 1,
     borderColor: '#BFDBFE',
   },
@@ -256,59 +254,20 @@ const styles = StyleSheet.create({
   placeholder: {
     color: Colors.textSecondary,
   },
-  urgencyContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  urgencyChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: '#fff',
-  },
-  urgencyChipActive: {
-    backgroundColor: '#EFF6FF',
-    borderColor: Colors.primary,
-  },
-  urgencyText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
   textArea: {
     height: 100,
     textAlignVertical: 'top',
-  },
-  helperText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 12,
-  },
-  photoRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  photoButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 8,
-    padding: 16,
-    borderStyle: 'dashed',
-    backgroundColor: '#F9FAFB',
-  },
-  photoButtonText: {
-    marginLeft: 8,
-    color: Colors.textSecondary,
-    fontWeight: '500',
   },
   submitButton: {
     marginBottom: 20,
   }
 });
+
+
+
+
+
+
+
+
+

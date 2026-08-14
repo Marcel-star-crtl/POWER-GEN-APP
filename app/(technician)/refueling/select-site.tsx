@@ -21,6 +21,7 @@ interface Site {
   currentFuelLevel?: number;
   tankCapacity?: number;
   percentage?: number;
+  hasFuelData?: boolean;
   lastRefuelDate?: string | null;
   scheduledDate?: string | null;
   maintenanceId?: string | null;
@@ -256,7 +257,8 @@ export default function RefuelingScreen() {
               {sitesForDate.map((item) => {
                 const { bg, fg } = getPriorityColors(item.priority);
                 const pct        = item.percentage ?? 0;
-                const fuelColor  = getFuelColor(pct);
+                const hasData    = item.hasFuelData !== false; // default true for older cached data without this field
+                const fuelColor  = hasData ? getFuelColor(pct) : "#9CA3AF";
 
                 return (
                   <TouchableOpacity
@@ -284,7 +286,9 @@ export default function RefuelingScreen() {
 
                       {/* Fuel % */}
                       <View style={styles.fuelIndicator}>
-                        <Text style={[styles.fuelPct, { color: fuelColor }]}>{pct}%</Text>
+                        <Text style={[styles.fuelPct, { color: fuelColor }]}>
+                          {hasData ? `${pct}%` : 'No data'}
+                        </Text>
                         <Text style={styles.fuelLabel}>Fuel Level</Text>
                       </View>
                     </View>
@@ -294,7 +298,7 @@ export default function RefuelingScreen() {
                       <View
                         style={[
                           styles.progressFill,
-                          { width: `${Math.min(pct, 100)}%` as any, backgroundColor: fuelColor },
+                          { width: `${hasData ? Math.min(pct, 100) : 0}%` as any, backgroundColor: fuelColor },
                         ]}
                       />
                     </View>

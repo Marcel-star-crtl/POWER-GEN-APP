@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../../constants/Colors';
 import { Card } from '../../../components/ui/Card';
 import { api } from '../../../services/api';
+import { cachedGet } from '../../../services/offlineApi';
 
 // Mock data generator for non-generator equipment
 const getMockEquipment = (siteId: string, type: string) => {
@@ -44,8 +45,8 @@ export default function SelectEquipment() {
             try {
                 if (type === 'generator' && siteId) {
                     // Fetch real generators from the API
-                    const response = await api.get(`/sites/${siteId}`);
-                    const siteData = response.data.data;
+                    const { data: response } = await cachedGet(`/sites/${siteId}`);
+                    const siteData = response.data;
                     
                     if (siteData?.Current_Generators && Array.isArray(siteData.Current_Generators)) {
                         setEquipment(siteData.Current_Generators);
@@ -269,3 +270,9 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     }
 });
+
+
+
+
+
+

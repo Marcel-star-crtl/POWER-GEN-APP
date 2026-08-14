@@ -39,6 +39,14 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Grato needs your location to verify you're at the correct site before you refuel or perform maintenance."
+        }
       ]
     ],
     "experiments": {

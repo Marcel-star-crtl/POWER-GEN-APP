@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { api } from '../../services/api';
+import { cachedGet } from '../../services/offlineApi';
 import { ApiResponse } from '../../types/common.types';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
@@ -40,11 +41,14 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [fuelPending, setFuelPending] = useState<any[]>([]);
+
   const fetchNotifications = useCallback(async () => {
     try {
-      const response = await api.get<ApiResponse<Notification[]>>('/technician/notifications');
-      if (response.data.data) {
-        setNotifications(response.data.data);
+      // Use cachedGet so offline shows last-known notifications (not blank)
+      const { data: response } = await cachedGet<ApiResponse<Notification[]>>('/technician/notifications');
+      if (response?.data) {
+        setNotifications(response.data);
       }
     } catch (error) {
       console.error('Failed to fetch notifications:', error);
@@ -53,6 +57,20 @@ export default function Notifications() {
       setRefreshing(false);
     }
   }, []);
+
+  const fetchFuelPending = useCallback(async () => {
+    try {
+      const { data: res } = await cachedGet('/fuel-requests/scheduled-for-me');
+      setFuelPending(res?.data || []);
+    } catch {}
+  }, []);
+
+  // Poll both every 30s (same cadence as the layout unread count)
+  useEffect(() => {
+    fetchFuelPending();
+    const iv = setInterval(fetchFuelPending, 30000);
+    return () => clearInterval(iv);
+  }, [fetchFuelPending]);
 
   useEffect(() => {
     fetchNotifications();
@@ -188,27 +206,48 @@ export default function Notifications() {
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
+  <View style={styles.loadingContainer}>
+    <ActivityIndicator size="large" color={Colors.primary} />
+  </View>
+) : (
+  <>
+    {fuelPending.length > 0 && (
+      <View style={{ backgroundColor: '#FFF5F5', borderBottomWidth: 1, borderBottomColor: '#FECDD3', padding: 12 }}>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.primary, marginBottom: 6 }}>
+          ⛽ {fuelPending.length} Fuel Request{fuelPending.length !== 1 ? 's' : ''} Ready for Refueling
+        </Text>
+        {fuelPending.map((fr: any) => (
+          <TouchableOpacity
+            key={fr._id}
+            style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}
+            onPress={() => router.push('/(technician)/refueling-flow/scheduled-for-me')}
+          >
+            <Text style={{ fontSize: 12, color: '#374151', flex: 1 }}>
+              {fr.site_name} — {fr.liters_approved || fr.liters_requested}L
+            </Text>
+            <Text style={{ fontSize: 11, color: Colors.primary, fontWeight: '700' }}>Start →</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    )}
+    <FlatList
+      data={notifications}
+      renderItem={renderItem}
+      keyExtractor={(item) => item._id}
+      contentContainerStyle={styles.listContent}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />
+      }
+      ListEmptyComponent={
+        <View style={styles.emptyState}>
+          <FontAwesome5 name="bell-slash" size={48} color={Colors.textSecondary} />
+          <Text style={styles.emptyText}>No notifications</Text>
+          <Text style={styles.emptySubtext}>You're all caught up!</Text>
         </View>
-      ) : (
-        <FlatList
-          data={notifications}
-          renderItem={renderItem}
-          keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <FontAwesome5 name="bell-slash" size={48} color={Colors.textSecondary} />
-              <Text style={styles.emptyText}>No notifications</Text>
-              <Text style={styles.emptySubtext}>You're all caught up!</Text>
-            </View>
-          }
-        />
-      )}
+      }
+    />
+  </>
+)}
     </SafeAreaView>
   );
 }

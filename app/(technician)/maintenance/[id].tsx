@@ -20,6 +20,7 @@ import { LoadingOverlay } from "../../../components/ui/LoadingOverlay";
 import { Colors } from "../../../constants/Colors";
 import { useAuth } from "../../../context/AuthContext";
 import { api, uploadAPI } from "../../../services/api";
+import { cachedGet } from "../../../services/offlineApi";
 import { maintenanceWorkflowAPI } from "../../../services/maintenanceWorkflowAPI";
 import { isRestrictedAcScopeRole } from "../../../utils/roles";
 
@@ -108,9 +109,9 @@ export default function MaintenanceChecklist() {
     // Fetch server state
     let serverChecks: any = {};
     try {
-      const res = await api.get(`/technician/maintenance/${id}`);
-      if (res.data?.data) {
-        const task = res.data.data;
+      const { data: res } = await cachedGet(`/technician/maintenance/${id}`);
+      if (res?.data) {
+        const task = res.data;
         setSiteName(task.site_name ?? params.siteName ?? "");
         setSiteId(task.site_id ?? params.siteId ?? "");
         setTaskStatus(task.status ?? "in_progress");
@@ -276,7 +277,7 @@ export default function MaintenanceChecklist() {
         Alert.alert(
           "Submitted Successfully",
           "The maintenance report has been submitted to your supervisor.",
-          [{ text: "OK", onPress: () => router.navigate("/(technician)") }]
+          [{ text: "OK", onPress: () => router.navigate("/(technician)/dashboard") }]
         );
       } else {
         await api.post("/technician/visits", submissionData);
@@ -508,4 +509,11 @@ const styles = StyleSheet.create({
   },
   footer: { marginTop: 32 },
 });
+
+
+
+
+
+
+
 

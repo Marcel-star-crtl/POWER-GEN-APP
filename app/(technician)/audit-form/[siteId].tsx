@@ -21,7 +21,8 @@ import {
   PhotoCapture,
 } from "../../../components/ui/PhotoCapture";
 import { Colors } from "../../../constants/Colors";
-import { api, siteAPI, uploadAPI } from "../../../services/api";
+import { siteAPI } from "../../../services/api";
+import { submitOrQueue, generateClientId } from "../../../services/offlineApi";
 import { TechnicianSiteAuditForm as TechnicianSiteAuditFormType } from "../../../types/technician-audit.types";
 
 // ─────────────────────────────────────────────
@@ -342,15 +343,11 @@ export default function TechnicianSiteAuditForm() {
   }, [siteDetails]);
 
   // ── FIX: Read ALL possible ID fields from stored user ──────────────────────
-  // The JWT userId and user.id can differ — we store both and match either.
   const getCurrentUserId = useCallback(async (): Promise<string | undefined> => {
     try {
       const userStr = await AsyncStorage.getItem("user");
       if (!userStr) return undefined;
       const user = JSON.parse(userStr);
-      // Return the id that the server sees (matches req.user.userId from JWT)
-      // The server sets created_by = req.user.userId which comes from the JWT payload
-      // Store both so we can match whichever was used when the draft was created
       return user?.id || user?._id;
     } catch {
       return undefined;
@@ -437,7 +434,6 @@ export default function TechnicianSiteAuditForm() {
 
       if (draftStr) {
         const draft = JSON.parse(draftStr);
-        // ── FIX: No longer block loading based on owner match ──
         // Anyone who has this draft key on their device can edit it.
         // Ownership is enforced server-side; locally we just restore the form.
         setForm(draft.payload || buildInitialForm(siteId || ""));
@@ -464,7 +460,7 @@ export default function TechnicianSiteAuditForm() {
     );
   }, [sectionPhotos]);
 
-  // ── FIX: Reset form helper ────────────────────
+  // ── Reset form helper ────────────────────
   const resetForm = useCallback(async () => {
     setForm(buildInitialForm(siteId || ""));
     setSectionPhotos({});
@@ -472,12 +468,13 @@ export default function TechnicianSiteAuditForm() {
   }, [draftKey, siteId]);
 
   // ── Save draft ────────────────────────────────
+  // NOTE: photos are sent RAW (local uri, category, description) — submitOrQueue
+  // owns uploading them, whether online or via the offline sync queue.
   const saveDraft = useCallback(async () => {
     const currentUserId = await getCurrentUserId();
     let auditId: string | undefined;
 
     try {
-      // Read existing local draft to reuse auditId if present
       const existingDraft = await AsyncStorage.getItem(draftKey);
       if (existingDraft) {
         const parsed = JSON.parse(existingDraft);
@@ -485,61 +482,90 @@ export default function TechnicianSiteAuditForm() {
       }
 
       const sectionedPhotos = buildSectionedPhotos();
-      const processedPhotos =
-        sectionedPhotos.length > 0
-          ? await uploadAPI.processAndUploadData(sectionedPhotos)
-          : [];
+      const rawPhotos = sectionedPhotos.map((p) => ({
+        uri: p.uri,
+        category: p.__section || "general",
+        description: sectionLabels[p.__section] || p.__section || "",
+      }));
 
       const payload = {
         ...flattenEquipment(form),
         site_id_ihs: siteId,
         status: "draft",
-        photos: (processedPhotos || []).map((p: any) => ({
-          url: p.uri || p.url || p,
-          category: p.__section || "general",
-          description: sectionLabels[p.__section] || p.__section || "",
-        })),
+        photos: rawPhotos,
       };
 
+      let result;
       if (auditId) {
         try {
-          const res = await api.put(`/technician/site-audits/${auditId}`, payload);
-          auditId = res.data?.data?._id || auditId;
-        } catch (updateErr) {
-          const status = (updateErr as any)?.response?.status;
+          result = await submitOrQueue(
+            "site_audit_draft",
+            `/technician/site-audits/${auditId}`,
+            "PUT",
+            payload,
+          );
+          if (result.data?._id) auditId = result.data._id;
+        } catch (updateErr: any) {
+          const status = updateErr?.response?.status;
           if (status === 403 || status === 404) {
             // Draft on server belongs to someone else or was deleted — create fresh
-            const res = await api.post("/technician/site-audit", payload);
-            auditId = res.data?.data?._id;
+            const createClientId = generateClientId();
+            result = await submitOrQueue(
+              "site_audit_draft",
+              "/technician/site-audit",
+              "POST",
+              { ...payload, client_id: createClientId },
+            );
+            if (result.data?._id) auditId = result.data._id;
           } else {
             throw updateErr;
           }
         }
       } else {
-        const res = await api.post("/technician/site-audit", payload);
-        auditId = res.data?.data?._id;
+        const createClientId = generateClientId();
+        result = await submitOrQueue(
+          "site_audit_draft",
+          "/technician/site-audit",
+          "POST",
+          { ...payload, client_id: createClientId },
+        );
+        if (result.data?._id) auditId = result.data._id;
       }
+
+      // Always persist locally regardless of server outcome
+      await AsyncStorage.setItem(
+        draftKey,
+        JSON.stringify({
+          siteId,
+          updatedAt: new Date().toISOString(),
+          payload: form,
+          sectionPhotos,
+          auditId,
+          createdBy: currentUserId,
+        }),
+      );
+
+      Alert.alert(
+        "Draft Saved",
+        result?.queued
+          ? "No connection — draft saved locally and will sync automatically."
+          : "Draft saved and synced to server.",
+      );
     } catch (error) {
       console.warn("Draft server save failed, saving locally only:", error);
+      await AsyncStorage.setItem(
+        draftKey,
+        JSON.stringify({
+          siteId,
+          updatedAt: new Date().toISOString(),
+          payload: form,
+          sectionPhotos,
+          auditId,
+          createdBy: currentUserId,
+        }),
+      );
+      Alert.alert("Draft Saved", "Saved locally.");
     }
-
-    // Always persist locally regardless of server outcome
-    await AsyncStorage.setItem(
-      draftKey,
-      JSON.stringify({
-        siteId,
-        updatedAt: new Date().toISOString(),
-        payload: form,
-        sectionPhotos,
-        auditId,
-        createdBy: currentUserId,
-      }),
-    );
-
-    Alert.alert(
-      "Draft Saved",
-      auditId ? "Draft saved and synced to server." : "Draft saved locally.",
-    );
   }, [
     buildSectionedPhotos,
     draftKey,
@@ -556,7 +582,6 @@ export default function TechnicianSiteAuditForm() {
     try {
       let auditId: string | undefined;
 
-      // Read existing auditId from local draft
       const existingDraft = await AsyncStorage.getItem(draftKey);
       if (existingDraft) {
         const parsed = JSON.parse(existingDraft);
@@ -564,54 +589,72 @@ export default function TechnicianSiteAuditForm() {
       }
 
       const sectionedPhotos = buildSectionedPhotos();
-      const processedPhotos = await uploadAPI.processAndUploadData(sectionedPhotos);
+      const rawPhotos = sectionedPhotos.map((p) => ({
+        uri: p.uri,
+        category: p.__section || "general",
+        description: sectionLabels[p.__section] || p.__section || "",
+      }));
 
       const submitPayload = {
         ...flattenEquipment(form),
         site_id_ihs: siteId,
         status: "submitted",
-        photos: (processedPhotos || []).map((p: any) => ({
-          url: p.uri || p.url || p,
-          category: p.__section || "general",
-          description: sectionLabels[p.__section] || p.__section || "",
-        })),
+        photos: rawPhotos,
       };
 
+      let result;
       if (auditId) {
         try {
-          await api.put(`/technician/site-audits/${auditId}`, submitPayload);
-        } catch (updateError) {
-          const status = (updateError as any)?.response?.status;
+          result = await submitOrQueue(
+            "site_audit_submit",
+            `/technician/site-audits/${auditId}`,
+            "PUT",
+            submitPayload,
+          );
+        } catch (updateError: any) {
+          const status = updateError?.response?.status;
 
-          if (status === 403) {
-            // ── FIX: Server says we don't own this auditId.
-            // This happens when the stored auditId was created by a different
-            // user (e.g. the draft key was reused). Just create a new record.
-            console.warn("Draft owned by another user on server — creating new audit record.");
-            await api.post("/technician/site-audit", submitPayload);
-          } else if (status === 404) {
-            // Record was deleted server-side — create fresh
-            await api.post("/technician/site-audit", submitPayload);
+          if (status === 403 || status === 404) {
+            // Draft owned by another user, or was deleted server-side — create fresh
+            const createClientId = generateClientId();
+            result = await submitOrQueue(
+              "site_audit_submit",
+              "/technician/site-audit",
+              "POST",
+              { ...submitPayload, client_id: createClientId },
+            );
           } else {
-            const data = (updateError as any)?.response?.data;
+            const data = updateError?.response?.data;
             const message = data?.error || data?.message || "Unable to submit. Please try again.";
             Alert.alert("Submission failed", message);
             return;
           }
         }
       } else {
-        await api.post("/technician/site-audit", submitPayload);
+        const createClientId = generateClientId();
+        result = await submitOrQueue(
+          "site_audit_submit",
+          "/technician/site-audit",
+          "POST",
+          { ...submitPayload, client_id: createClientId },
+        );
       }
 
-      // ── FIX: Clear draft + reset form on success ──
+      // Clear draft + reset form on success (including "queued" success)
       await resetForm();
 
-      Alert.alert("Submitted", "Audit submitted successfully.", [
-        {
-          text: "OK",
-          onPress: () => router.replace("/(technician)/dashboard"),
-        },
-      ]);
+      Alert.alert(
+        "Submitted",
+        result?.queued
+          ? "No connection — audit saved and will sync automatically."
+          : "Audit submitted successfully.",
+        [
+          {
+            text: "OK",
+            onPress: () => router.replace("/(technician)/dashboard"),
+          },
+        ],
+      );
     } catch (error) {
       console.error("Audit submission error:", error);
       Alert.alert(
@@ -630,7 +673,6 @@ export default function TechnicianSiteAuditForm() {
     router,
     saveDraft,
     sectionLabels,
-    sectionPhotos,
     siteId,
   ]);
 

@@ -26,6 +26,7 @@ import { StatusToggle } from "../../../../components/ui/StatusToggle";
 import { Colors } from "../../../../constants/Colors";
 import { useAuth } from "../../../../context/AuthContext";
 import { api, uploadAPI } from "../../../../services/api";
+import { cachedGet } from "../../../../services/offlineApi";
 import { isFuelRole, isRestrictedAcScopeRole } from "../../../../utils/roles";
 
 const EQUIPMENT_TITLES: { [key: string]: string } = {
@@ -92,8 +93,8 @@ const GeneratorForm = ({
     if (!siteId) return;
     try {
       setLoadingGenerators(true);
-      const response = await api.get(`/sites/${siteId}`);
-      const siteData = response.data.data;
+      const { data: response } = await cachedGet(`/sites/${siteId}`);
+      const siteData = response.data;
       if (
         siteData?.Current_Generators &&
         Array.isArray(siteData.Current_Generators)
@@ -1842,10 +1843,10 @@ export default function EquipmentForm() {
 
       if (maintenanceId) {
         try {
-          const response = await api.get(
+          const { data: response } = await cachedGet(
             `/technician/maintenance/${maintenanceId}`,
           );
-          const maintenance = response.data.data;
+          const maintenance = response.data;
 
           if (maintenance?.equipment_checks) {
             let serverData = null;
@@ -2935,4 +2936,10 @@ const styles = StyleSheet.create({
     gap: 16,
   },
 });
+
+
+
+
+
+
 

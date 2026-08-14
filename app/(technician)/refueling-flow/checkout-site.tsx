@@ -5,42 +5,50 @@ import {
   ActivityIndicator, ScrollView,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { refuelWorkflowAPI } from "../../../services/refuelWorkflowAPI";
+import { useTranslation } from "react-i18next";
+import { patchWorkflowStatus } from "../../../services/offlineWorkflow";
+import { stopSharing } from "../../../services/technicianTracking";
 import { Colors } from "../../../constants/Colors";
 import { FontAwesome5 } from "@expo/vector-icons";
 
 export default function CheckoutSiteScreen() {
   const router  = useRouter();
+  const { t } = useTranslation();
   const params  = useLocalSearchParams<{
     siteId: string;
     siteCode: string;
     siteName: string;
     workflowId: string;
+    workflowClientId: string;
   }>();
 
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
-    if (!params.workflowId) {
-      Alert.alert("Error", "Workflow ID missing.");
-      return;
-    }
-
+    setLoading(true);
     try {
-      setLoading(true);
-
-      await refuelWorkflowAPI.updateStatus(params.workflowId, "checked_out", {
-        checkedOutAt: new Date().toISOString(),
-      });
+      // Always succeeds locally, online or offline -- see offlineWorkflow.ts.
+      await patchWorkflowStatus(
+        params.siteId,
+        params.workflowId,
+        params.workflowClientId,
+        "checked_out",
+        { checkedOutAt: new Date().toISOString() },
+      );
 
       console.log("[Checkout] Patched checked_out, workflowId:", params.workflowId);
 
-      Alert.alert("Checked Out", "You have successfully checked out of the site.", [
-        { text: "OK", onPress: () => router.replace("/(technician)/dashboard") },
+      // Stop sharing location the moment checkout is confirmed — don't
+      // wait for the 20-minute TTL to let a stale "still there" position
+      // sit on a manager's map after the technician is genuinely done.
+      stopSharing();
+
+      Alert.alert(t("checked_out", "Checked Out"), t("checkout_success_message", "You have successfully checked out of the site."), [
+        { text: t("ok", "OK"), onPress: () => router.replace("/(technician)/dashboard") },
       ]);
     } catch (err: any) {
       console.error("[Checkout] error:", err?.message);
-      Alert.alert("Error", "Failed to save checkout.");
+      Alert.alert(t("error", "Error"), t("failed_save_checkout", "Failed to save checkout."));
     } finally {
       setLoading(false);
     }
@@ -52,7 +60,7 @@ export default function CheckoutSiteScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.back}>
           <FontAwesome5 name="arrow-left" size={20} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Check Out</Text>
+        <Text style={styles.headerTitle}>{t("check_out", "Check Out")}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -67,7 +75,7 @@ export default function CheckoutSiteScreen() {
         <View style={styles.infoCard}>
           <FontAwesome5 name="info-circle" size={16} color="#92400E" />
           <Text style={styles.infoText}>
-            Checking out will mark your visit as complete. Make sure you have submitted the refueling form before checking out.
+            {t("checkout_info_text", "Checking out will mark your visit as complete. Make sure you have submitted the refueling form before checking out.")}
           </Text>
         </View>
 
@@ -78,11 +86,11 @@ export default function CheckoutSiteScreen() {
         >
           {loading
             ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.btnText}>Confirm Check Out</Text>}
+            : <Text style={styles.btnText}>{t("confirm_check_out", "Confirm Check Out")}</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()}>
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>{t("cancel", "Cancel")}</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -115,6 +123,9 @@ const styles = StyleSheet.create({
   cancelBtn:  { paddingVertical: 12 },
   cancelText: { color: "#6B7280", fontSize: 15 },
 });
+
+
+
 
 
 

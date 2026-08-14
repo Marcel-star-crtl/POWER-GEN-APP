@@ -4,8 +4,11 @@ import {
   Alert, ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { refuelWorkflowAPI } from "../../../services/refuelWorkflowAPI";
-import { api } from "../../../services/api";
+import { getWorkflow, patchWorkflowStatus } from "../../../services/offlineWorkflow";
+import { stopSharing } from "../../../services/technicianTracking";
+import { clearLocalWorkflow } from "../../../lib/workflowCache";
+import { drawDownLocalPurchase } from "../../../lib/localPurchases";
+import { submitOrQueue, generateClientId } from "../../../services/offlineApi";
 import { Colors } from "../../../constants/Colors";
 import { FontAwesome5 } from "@expo/vector-icons";
 
@@ -13,6 +16,7 @@ export default function RefuelSummaryScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     workflowId: string;
+    workflowClientId: string;
     siteId: string;
     siteName: string;
     maintenanceId: string;
@@ -24,12 +28,13 @@ export default function RefuelSummaryScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!params.workflowId) { setLoading(false); return; }
-    refuelWorkflowAPI.get(params.workflowId)
-      .then(res => setWorkflow(res.data?.data))
-      .catch(() => {})
+    if (!params.siteId) { setLoading(false); return; }
+    // Read from the local workflow cache -- always populated regardless of
+    // connectivity, since every step in this flow writes through it first.
+    getWorkflow(params.siteId)
+      .then((w) => setWorkflow(w))
       .finally(() => setLoading(false));
-  }, [params.workflowId]);
+  }, [params.siteId]);
 
   const getStep = (status: string) =>
     workflow?.workflow_history?.find((h: any) => h.status === status);
@@ -46,31 +51,72 @@ export default function RefuelSummaryScreen() {
     try {
       const payload = JSON.parse(params.formPayload);
 
-      // Include workflowId so backend updates the existing record
-      const response = await api.post("/technician/refuel", {
-        ...payload,
-        workflowId: params.workflowId,
-      });
+      // Stable id so a retried offline sync can't create a duplicate record.
+      const clientId = generateClientId();
 
-      if (response.data.success) {
-        // Patch form_submitted + checked_out on workflow record
-        if (params.workflowId) {
-          await refuelWorkflowAPI.updateStatus(params.workflowId, "form_submitted", {
-            submittedAt: new Date().toISOString(),
-          });
+      const result = await submitOrQueue(
+        "refuel_submit",
+        "/technician/refuel",
+        "POST",
+        { ...payload, workflowId: params.workflowId, client_id: clientId },
+      );
+
+      // Reflect the draw-down locally too, immediately -- so if the
+      // technician picks the SAME purchase again for another site before
+      // this submission has synced, the remaining balance shown is
+      // accurate rather than stale.
+      if (payload.fuel_purchase_client_id && payload.fuel_added) {
+        await drawDownLocalPurchase(payload.fuel_purchase_client_id, Number(payload.fuel_added)).catch(() => {});
+      }
+
+      if (params.siteId && params.workflowId && params.workflowClientId) {
+        // Small status pings -- patchWorkflowStatus always succeeds locally
+        // and queues the server side.
+        await patchWorkflowStatus(
+          params.siteId, params.workflowId, params.workflowClientId,
+          "form_submitted", { submittedAt: new Date().toISOString() },
+        );
+
+        // Only fully check out (and clear the local workflow cache) when
+        // the technician said this delivery is actually complete. If
+        // they said "no, I'll return to add the rest" (delivery_complete
+        // === false), the visit isn't over — checking them out and
+        // wiping the cache here was the actual bug: it made the site
+        // impossible to correctly resume later, on top of its fuel
+        // request still genuinely needing more fuel. Leave the workflow
+        // at form_submitted and the cache intact so a return visit to
+        // this exact site picks up where it left off instead of looking
+        // like nothing is pending here at all.
+        if (payload.delivery_complete !== false) {
           const alreadyCheckedOut = workflow?.workflow_history?.some(
             (h: any) => h.status === "checked_out"
           );
           if (!alreadyCheckedOut) {
-            await refuelWorkflowAPI.updateStatus(params.workflowId, "checked_out", {
-              checkedOutAt: new Date().toISOString(),
-            });
+            await patchWorkflowStatus(
+              params.siteId, params.workflowId, params.workflowClientId,
+              "checked_out", { checkedOutAt: new Date().toISOString() },
+            );
           }
+          // Stops location sharing (see services/technicianTracking.ts) —
+          // this checkout path bypasses the dedicated checkout-site.tsx
+          // screen entirely, so without this call sharing would never
+          // actually stop for a technician who completes their visit by
+          // submitting the form here rather than through that screen.
+          stopSharing();
+          // This site's visit is fully wrapped up -- clear the local workflow
+          // cache so the NEXT visit to this site starts clean rather than
+          // resuming a completed one.
+          await clearLocalWorkflow(params.siteId).catch(() => {});
         }
-        Alert.alert("Success", "Refueling submitted successfully!", [
-          { text: "OK", onPress: () => router.replace("/(technician)/refueling") },
-        ]);
       }
+
+      Alert.alert(
+        "Success",
+        result.queued
+          ? "No connection — refueling saved and will sync automatically."
+          : "Refueling submitted successfully!",
+        [{ text: "OK", onPress: () => router.replace("/(technician)/refueling") }],
+      );
     } catch (err: any) {
       Alert.alert("Error", err?.response?.data?.error || err?.message || "Submission failed.");
     } finally {
@@ -110,12 +156,15 @@ export default function RefuelSummaryScreen() {
           </Text>
         </View>
 
-        {/* Fuel Station */}
+        {/* Fuel Purchase */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Fuel Station</Text>
-          <Text style={styles.row}>Date/Time: {fmt(getStep("fuel_station")?.timestamp)}</Text>
-          <Text style={styles.row}>Photo: {getStep("fuel_station")?.meta?.photo ? "✓ Yes" : "No"}</Text>
-          <Text style={styles.row}>Quantity: {getStep("fuel_station")?.meta?.fuelQty ?? "-"} L</Text>
+          <Text style={styles.cardTitle}>Fuel Purchase</Text>
+          <Text style={styles.row}>Date/Time: {fmt(getStep("purchase_selected")?.timestamp)}</Text>
+          <Text style={styles.row}>
+            Purchase: {getStep("purchase_selected")?.meta?.fuelPurchaseId
+              || getStep("purchase_selected")?.meta?.fuelPurchaseClientId
+              || "-"}
+          </Text>
         </View>
 
         {/* Check-In */}
@@ -134,6 +183,7 @@ export default function RefuelSummaryScreen() {
               const d = JSON.parse(params.formPayload);
               return (
                 <>
+                  <Text style={styles.row}>Visit Date: {d.visit_date} {d.visit_time}</Text>
                   <Text style={styles.row}>Opening Level: {d.opening_level} L</Text>
                   <Text style={styles.row}>Closing Level: {d.closing_level} L</Text>
                   <Text style={styles.row}>Fuel Added: {d.fuel_added} L</Text>
@@ -190,5 +240,12 @@ const styles = StyleSheet.create({
   },
   btnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });
+
+
+
+
+
+
+
 
 

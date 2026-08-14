@@ -17,15 +17,18 @@ import { LoadingOverlay } from "../../../components/ui/LoadingOverlay";
 import { Colors } from "../../../constants/Colors";
 import { useAuth } from "../../../context/AuthContext";
 import { api, uploadAPI } from "../../../services/api";
+import { cachedGet } from "../../../services/offlineApi";
 import { checkOutSite } from "../../../services/siteVisit";
 // import { isRestrictedAcScopeRole } from "../../../utils/roles";
 import { isFuelRole, isRestrictedAcScopeRole } from "../../../utils/roles";
 
 interface CheckItem {
-  title: string;
+  titleKey: string;
+  defaultTitle: string;
   type: string;
   icon: string;
   status: "pending" | "completed";
+  fuelOnly?: boolean;
 }
 
 const PREVENTIVE_CHECKS = [
@@ -153,7 +156,7 @@ export default function MaintenanceChecklist() {
     // Initialize checks based on type
 
     // Helper to render translated checklist titles
-    function renderCheckTitle(t, check) {
+    function renderCheckTitle(t: (key: string, defaultValue: string) => string, check: CheckItem) {
       return t(check.titleKey, check.defaultTitle);
     }
     let initialChecks = [];
@@ -187,9 +190,9 @@ export default function MaintenanceChecklist() {
   const fetchServerProgress = async () => {
     if (!maintenanceId) return;
     try {
-      const res = await api.get(`/technician/maintenance/${maintenanceId}`);
-      if (res.data.data) {
-        const m = res.data.data;
+      const { data: res } = await cachedGet(`/technician/maintenance/${maintenanceId}`);
+      if (res.data) {
+        const m = res.data;
         const serverChecks = m.equipment_checks || {};
 
         const updatedChecks = checks.map((c) => {
@@ -219,11 +222,11 @@ export default function MaintenanceChecklist() {
     let serverChecks: any = {};
     if (maintenanceId) {
       try {
-        const res = await api.get(`/technician/maintenance/${maintenanceId}`);
-        if (res.data && res.data.data && res.data.data.equipment_checks) {
-          serverChecks = res.data.data.equipment_checks;
+        const { data: res } = await cachedGet(`/technician/maintenance/${maintenanceId}`);
+        if (res && res.data && res.data.equipment_checks) {
+          serverChecks = res.data.equipment_checks;
         }
-      } catch (err) {
+      } catch (err: any) {
         // ignore server errors but keep local draft checking
         console.error(
           "Unable to fetch server checks for progress:",
@@ -355,7 +358,7 @@ export default function MaintenanceChecklist() {
         Alert.alert(
           "Submitted Successfully",
           "The maintenance report has been submitted to your supervisor.",
-          [{ text: "OK", onPress: () => router.navigate("/(technician)") }],
+          [{ text: "OK", onPress: () => router.navigate("/(technician)/dashboard") }],
         );
       } else {
         // Draft logic
@@ -632,3 +635,8 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
 });
+
+
+
+
+

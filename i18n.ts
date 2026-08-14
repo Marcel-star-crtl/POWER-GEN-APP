@@ -1,15 +1,62 @@
 // i18n.ts
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Localization from "expo-localization";
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+
+const SUPPORTED_LANGUAGES = ["en", "fr"] as const;
+type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+const LANGUAGE_STORAGE_KEY = "user_language_preference";
+
+function isSupported(lang: string | null | undefined): lang is SupportedLanguage {
+  return !!lang && (SUPPORTED_LANGUAGES as readonly string[]).includes(lang);
+}
+
+/**
+ * Best starting guess for language, used synchronously at init so the app
+ * doesn't render in the wrong language for a frame before the async
+ * AsyncStorage check below resolves. Device locale detection (English
+ * default previously had no auto-detection at all — every device, in
+ * every language, always showed English on first launch).
+ */
+function getInitialLanguage(): SupportedLanguage {
+  try {
+    const deviceLang = Localization.getLocales()[0]?.languageCode;
+    if (isSupported(deviceLang)) return deviceLang;
+  } catch {
+    // Localization module unavailable (e.g. certain test/web environments) — fall through to default.
+  }
+  return "en";
+}
 
 const en = {
   // General
   hi: "Hi",
+  contact_information: "Contact Information",
+  language: "Language",
+  sign_out: "Sign Out",
   of: "of",
   error: "Error",
+  activating_site: "Activating site...",
+  preparing_workflow: "Preparing workflow...",
+  resuming_last_step: "Resuming from last step...",
+  missing_site_or_user_info: "Missing site or user info.",
   loading: "Loading...",
   submitting: "Submitting...",
   save_draft: "Save Draft",
+  delivery_status: "Delivery Status",
+  delivery_status_question: "Is this delivery complete?",
+  delivery_complete_yes: "Yes — tank is full / delivery complete",
+  delivery_complete_no: "No — I'll return to add the rest",
+  delivery_partial_note: "This request will stay open and visible on your dashboard until the remaining fuel is delivered. The unused approved litres stay reserved for this site — they won't be released to other requests.",
+  delivery_shortfall_warning: "You've entered less than what was approved for this site.",
+  draft_saved: "Draft Saved",
+  draft_saved_message: "Your progress has been saved. You can come back and continue this refueling later.",
+  draft_save_failed: "Could not save draft. Please try again.",
+  draft_found: "Draft Found",
+  draft_found_message: "You have a saved draft for this site. Restore it?",
+  discard: "Discard",
+  restore: "Restore",
   submit_report: "Submit Report",
   retry: "Retry",
   new: "New",
@@ -34,6 +81,12 @@ const en = {
 
   // Dashboard
   quick_actions: "Quick Actions",
+  tank_audit: "Tank Audit",
+  tank_capacity_leak_checklist: "Tank capacity & leak checklist",
+  tank_audit_draft_singular: "1 Tank Audit draft in progress — tap to resume",
+  tank_audit_draft_plural: "{{count}} Tank Audit drafts in progress — tap to resume",
+  quick_summary_questions: "Quick Summary Questions",
+  gen_card_faulty_question: "Is the Gen Card faulty?",
   todays_summary: "Today's Summary",
   pending: "Pending",
   in_progress: "In Progress",
@@ -317,6 +370,11 @@ const en = {
   check_out: "Check Out",
   checking_site_entry: "Checking site entry...",
   ok: "OK",
+  cancel: "Cancel",
+  checkout_success_message: "You have successfully checked out of the site.",
+  failed_save_checkout: "Failed to save checkout.",
+  checkout_info_text: "Checking out will mark your visit as complete. Make sure you have submitted the refueling form before checking out.",
+  confirm_check_out: "Confirm Check Out",
   success: "Success",
   corrective_maintenance_title: "Corrective Maintenance",
   available_parts: "Available Parts",
@@ -350,11 +408,31 @@ const en = {
 const fr: typeof en = {
   // General
   hi: "Bonjour",
+  contact_information: "Informations de contact",
+  language: "Langue",
+  sign_out: "Déconnexion",
   of: "sur",
   error: "Erreur",
+  activating_site: "Activation du site...",
+  preparing_workflow: "Préparation du flux de travail...",
+  resuming_last_step: "Reprise de la dernière étape...",
+  missing_site_or_user_info: "Informations sur le site ou l'utilisateur manquantes.",
   loading: "Chargement...",
   submitting: "Soumission...",
   save_draft: "Enregistrer le brouillon",
+  delivery_status: "Statut de la livraison",
+  delivery_status_question: "Cette livraison est-elle complète ?",
+  delivery_complete_yes: "Oui — réservoir plein / livraison terminée",
+  delivery_complete_no: "Non — je reviendrai pour compléter",
+  delivery_partial_note: "Cette demande restera ouverte et visible sur votre tableau de bord jusqu'à ce que le carburant restant soit livré. Les litres approuvés non utilisés restent réservés pour ce site — ils ne seront pas libérés vers d'autres demandes.",
+  delivery_shortfall_warning: "Vous avez saisi moins que ce qui a été approuvé pour ce site.",
+  draft_saved: "Brouillon enregistré",
+  draft_saved_message: "Votre progression a été enregistrée. Vous pouvez revenir plus tard pour continuer ce ravitaillement.",
+  draft_save_failed: "Impossible d'enregistrer le brouillon. Veuillez réessayer.",
+  draft_found: "Brouillon trouvé",
+  draft_found_message: "Vous avez un brouillon enregistré pour ce site. Le restaurer ?",
+  discard: "Ignorer",
+  restore: "Restaurer",
   submit_report: "Soumettre le rapport",
   retry: "Réessayer",
   new: "Nouveau",
@@ -379,6 +457,12 @@ const fr: typeof en = {
 
   // Dashboard
   quick_actions: "Actions rapides",
+  tank_audit: "Audit de cuve",
+  tank_capacity_leak_checklist: "Liste de contrôle capacité et fuites de la cuve",
+  tank_audit_draft_singular: "1 brouillon d'audit de cuve en cours — appuyez pour reprendre",
+  tank_audit_draft_plural: "{{count}} brouillons d'audit de cuve en cours — appuyez pour reprendre",
+  quick_summary_questions: "Questions rapides",
+  gen_card_faulty_question: "La carte du groupe électrogène est-elle défectueuse ?",
   todays_summary: "Résumé du jour",
   pending: "En attente",
   in_progress: "En cours",
@@ -662,6 +746,11 @@ const fr: typeof en = {
   check_out: "Pointer la sortie",
   checking_site_entry: "Vérification de l'entrée sur le site...",
   ok: "OK",
+  cancel: "Annuler",
+  checkout_success_message: "Vous avez été enregistré comme sorti du site avec succès.",
+  failed_save_checkout: "Échec de l'enregistrement de la sortie.",
+  checkout_info_text: "Pointer la sortie marquera votre visite comme terminée. Assurez-vous d'avoir soumis le formulaire de ravitaillement avant de sortir.",
+  confirm_check_out: "Confirmer la sortie",
   success: "Succès",
 
   corrective_maintenance_title: "Maintenance corrective",
@@ -698,9 +787,40 @@ i18n.use(initReactI18next).init({
     en: { translation: en },
     fr: { translation: fr },
   },
-  lng: "en",
+  lng: getInitialLanguage(),
   fallbackLng: "en",
   interpolation: { escapeValue: false },
 });
 
+// After init, check for a manually-chosen language preference (persisted
+// from a previous session) and apply it if present — a saved manual
+// choice takes priority over device locale, so switching your phone's
+// system language doesn't silently override a language you picked inside
+// the app.
+AsyncStorage.getItem(LANGUAGE_STORAGE_KEY)
+  .then((saved) => {
+    if (isSupported(saved) && saved !== i18n.language) {
+      i18n.changeLanguage(saved);
+    }
+  })
+  .catch(() => {
+    // Non-fatal — app continues with the device-locale-detected language.
+  });
+
+/**
+ * Call this from a language-switcher UI. Persists the choice so it
+ * survives app restarts and future device-locale changes.
+ */
+export async function changeLanguage(lang: SupportedLanguage): Promise<void> {
+  await i18n.changeLanguage(lang);
+  try {
+    await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+  } catch {
+    // Non-fatal — the language still changes for this session even if
+    // persisting the preference fails.
+  }
+}
+
+export { SUPPORTED_LANGUAGES };
+export type { SupportedLanguage };
 export default i18n;

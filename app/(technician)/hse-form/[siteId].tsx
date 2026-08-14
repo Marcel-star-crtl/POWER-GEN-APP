@@ -20,7 +20,7 @@ import {
     PhotoCapture,
 } from "../../../components/ui/PhotoCapture";
 import { Colors } from "../../../constants/Colors";
-import { api, uploadAPI } from "../../../services/api";
+import { submitOrQueue } from "../../../services/offlineApi";
 
 // ─────────────────────────────────────────────
 // Types
@@ -264,37 +264,35 @@ export default function HSEInspectionForm() {
   }, [form]);
 
   // ── Save draft ────────────────────────────────
+  // NOTE: photos are sent RAW — submitOrQueue owns uploading them, whether
+  // online or via the offline sync queue. No more pre-upload here.
   const saveDraft = useCallback(async () => {
     try {
-      let processedPhotos = form.photos;
-      if (
-        form.photos.some(
-          (p) => p.uri.startsWith("file://") || p.uri.startsWith("content://"),
-        )
-      ) {
-        processedPhotos = await uploadAPI.processAndUploadData(form.photos);
-      }
-      const payload = { ...form, photos: processedPhotos };
+      const payload = { ...form, status: "draft" };
       await AsyncStorage.setItem(
         draftKey,
         JSON.stringify({
-          payload,
+          payload: form,
           updatedAt: new Date().toISOString(),
           siteId,
         }),
       );
 
-      try {
-        await api.post("/technician/hse-inspection", {
-          ...payload,
-          status: "draft",
-        });
-        Alert.alert("Draft Saved", "Saved and synced to server.");
-      } catch {
-        Alert.alert("Draft Saved", "Saved locally. Will sync when online.");
-      }
+      const result = await submitOrQueue(
+        "hse_inspection_draft",
+        "/technician/hse-inspection",
+        "POST",
+        payload,
+      );
+
+      Alert.alert(
+        "Draft Saved",
+        result.queued
+          ? "Saved locally. Will sync when online."
+          : "Saved and synced to server.",
+      );
     } catch (e) {
-      Alert.alert("Error", "Failed to save draft.");
+      Alert.alert("Draft Saved", "Saved locally. Will sync when online.");
     }
   }, [draftKey, form, siteId]);
 
@@ -306,21 +304,27 @@ export default function HSEInspectionForm() {
     }
     setSubmitting(true);
     try {
-      let processedPhotos = form.photos;
-      if (form.photos.length > 0) {
-        processedPhotos = await uploadAPI.processAndUploadData(form.photos);
-      }
-      const payload = { ...form, photos: processedPhotos, status: "submitted" };
-
-      await api.post("/technician/hse-inspection", payload);
+      const payload = { ...form, status: "submitted" };
+      const result = await submitOrQueue(
+        "hse_inspection_submit",
+        "/technician/hse-inspection",
+        "POST",
+        payload,
+      );
       await AsyncStorage.removeItem(draftKey);
 
-      Alert.alert("Submitted", "HSE inspection submitted successfully.", [
-        {
-          text: "OK",
-          onPress: () => router.replace("/(technician)/dashboard"),
-        },
-      ]);
+      Alert.alert(
+        "Submitted",
+        result.queued
+          ? "No connection — inspection saved and will sync automatically."
+          : "HSE inspection submitted successfully.",
+        [
+          {
+            text: "OK",
+            onPress: () => router.replace("/(technician)/dashboard"),
+          },
+        ],
+      );
     } catch (e: any) {
       console.error("HSE submit error", e);
       Alert.alert("Submission Failed", "Your data has been saved as a draft.");
@@ -802,3 +806,11 @@ const styles = StyleSheet.create({
   },
   submitButtonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
 });
+
+
+
+
+
+
+
+

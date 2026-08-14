@@ -20,6 +20,7 @@ import { Colors } from '../../constants/Colors';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { api, SERVER_URL } from '../../services/api';
+import { cachedGet } from '../../services/offlineApi';
 import { VisitFormData } from '../../types/visit.types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
@@ -90,10 +91,10 @@ export default function CreateVisit() {
   const fetchSites = async () => {
     try {
       setLoadingSites(true);
-      const response = await api.get('/technician/sites');
+      const { data: response } = await cachedGet('/technician/sites');
       console.log('✅ Sites loaded:', response.data);
-      if (response.data.data) {
-        setSites(response.data.data);
+      if (response.data) {
+        setSites(response.data);
       }
     } catch (error: any) {
       console.error('❌ Failed to fetch sites:', error);
@@ -1155,3 +1156,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
+
+
+
+
+

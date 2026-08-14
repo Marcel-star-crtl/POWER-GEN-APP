@@ -1,9 +1,9 @@
-// app/(technician)/refueling/index.tsx  (or wherever RefuelingScreen lives)
+// app/(technician)/refueling/index.tsx
 
 import React, { useEffect, useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, TextInput,
+  RefreshControl, TextInput, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
@@ -11,7 +11,8 @@ import { useTranslation } from "react-i18next";
 import { useFocusEffect } from "@react-navigation/native";
 import { Colors } from "../../../constants/Colors";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { api } from "../../../services/api";
+import { cachedGet } from "../../../services/offlineApi";
+import { useSyncCompletion } from "../../../hooks/useSyncCompletion";
 import { ApiResponse } from "../../../types/common.types";
 
 interface Site {
@@ -21,6 +22,7 @@ interface Site {
   currentFuelLevel?: number;
   tankCapacity?: number;
   percentage?: number;
+  hasFuelData?: boolean;
   lastRefuelDate?: string | null;
   scheduledDate?: string | null;
   maintenanceId?: string | null;
@@ -29,11 +31,265 @@ interface Site {
   maintenance_status?: string | null;
   workflow_status?: string | null;
   refuel_submitted?: boolean | null;
-  // ✅ added — backend should return this when a workflow already exists
   workflowId?: string | null;
 }
 
 type StatusFilter = "all" | "scheduled" | "unscheduled";
+
+
+// Module-level so both AssignmentCard and the main site list below can use
+// the same function — previously declared inside the main component only,
+// which meant AssignmentCard (a separate, module-level function) couldn't
+// actually reference it at all.
+function getFuelColor(pct: number) {
+  if (pct <= 10) return "#EF4444";
+  if (pct <= 25) return "#F59E0B";
+  if (pct <= 50) return "#3B82F6";
+  return "#22C55E";
+}
+
+function formatDate(iso?: string | null, fallback = "N/A") {
+  if (!iso) return fallback;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return fallback;
+  return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+}
+
+// ── AssignmentCard — matches the "My Assignments" screen card style ───────────
+function AssignmentCard({ r }: { r: any }) {
+  const litres    = r.liters_approved ?? r.liters_requested ?? 0;
+  const urg       = (r.urgency || 'medium').toLowerCase();
+  const urgColor  = urg === 'critical' ? '#DC2626' : urg === 'high' ? '#EF4444' : urg === 'medium' ? '#F59E0B' : '#22C55E';
+  const isCEO     = litres >= 100;
+  const canStart  = r.status === 'scheduled' || r.status === 'approved';
+  const canResume = r.status === 'purchase_made' || r.status === 'partially_refueled';
+  const remainingL = Math.max(0, litres - (r.liters_actually_added || 0));
+  const statusLabel =
+    r.status === 'purchase_made'      ? 'IN_PROGRESS' :
+    r.status === 'scheduled'          ? 'SCHEDULED'   :
+    r.status === 'partially_refueled' ? `PARTIAL — ${remainingL}L LEFT` :
+    r.status === 'refueled'           ? 'COMPLETED'   :
+    r.status === 'approved'           ? 'APPROVED'     : (r.status || '').toUpperCase();
+  const statusColor =
+    r.status === 'purchase_made'      ? '#D97706' :
+    r.status === 'scheduled'          ? '#1D4ED8' :
+    r.status === 'partially_refueled' ? '#DC2626' :
+    r.status === 'refueled'           ? '#16A34A' : '#6B7280';
+
+  // Fuel-level reading — same info shown on every card in the main site
+  // list below, previously missing here entirely. site_details is the
+  // FRESH current level/capacity (added to this endpoint's response
+  // earlier this project); r.current_fuel_level/r.tank_capacity are only
+  // a snapshot from whenever the request was originally created, kept as
+  // a fallback if site_details is ever unavailable.
+  const freshLevel    = r.site_details?.Fuel_Quantity_Found;
+  const freshCapacity = r.site_details?.Tank_Capacity;
+  const currentLevel  = freshLevel    ?? r.current_fuel_level ?? 0;
+  const tankCapacity  = freshCapacity ?? r.tank_capacity      ?? 5000;
+  const hasFuelData   = !!r.site_details?.Fuel_Level_Source || freshLevel != null;
+  const fuelPct       = tankCapacity > 0 ? Math.min(Math.round((currentLevel / tankCapacity) * 100), 100) : 0;
+  const fuelColor     = hasFuelData ? getFuelColor(fuelPct) : '#9CA3AF';
+
+  return (
+    <View style={aStyles.card}>
+      {/* Site name + cluster */}
+      <View style={aStyles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={aStyles.siteName}>{r.site_name || r.site_id}</Text>
+          <Text style={aStyles.siteId}>{r.site_id} · {r.cluster || ''}</Text>
+        </View>
+        <View style={aStyles.fuelIndicatorSmall}>
+          <Text style={[aStyles.fuelPctSmall, { color: fuelColor }]}>
+            {hasFuelData ? `${fuelPct}%` : 'No data'}
+          </Text>
+          <Text style={aStyles.fuelLabelSmall}>Fuel Level</Text>
+        </View>
+      </View>
+      <Text style={aStyles.tankText}>
+        Last refuel: {formatDate(r.site_details?.Actual_Date_Visit)}
+      </Text>
+      <Text style={aStyles.tankText}>Tank: {currentLevel} L / {tankCapacity} L</Text>
+
+      {/* Litres box — red, large, exactly like My Assignments */}
+      <View style={aStyles.litreBox}>
+        <View>
+          <View style={aStyles.litreRow}>
+            <FontAwesome5 name="tint" size={18} color={Colors.primary} style={{ marginRight: 6 }} />
+            <Text style={aStyles.litreText}>{litres} L</Text>
+          </View>
+          <Text style={aStyles.xafText}>XAF {(litres * 828).toLocaleString()}</Text>
+        </View>
+        {isCEO && (
+          <View style={aStyles.ceoBadge}>
+            <FontAwesome5 name="crown" size={11} color={Colors.primary} />
+            <Text style={aStyles.ceoText}> CEO Approved</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Budget line */}
+      {r.budget_snapshot && (
+        <View style={aStyles.budgetRow}>
+          <FontAwesome5 name="wallet" size={11} color="#6B7280" />
+          <Text style={aStyles.budgetText}>
+            {'  Budget: ' + (r.budget_snapshot.liters_used ?? 0) + ' L / ' + (r.budget_snapshot.budget_liters ?? 0) + ' L'}
+          </Text>
+        </View>
+      )}
+
+      {/* Reason */}
+      {r.request_reason ? (
+        <Text style={aStyles.reason} numberOfLines={2}>{'"' + r.request_reason + '"'}</Text>
+      ) : null}
+
+      {/* Urgency + Status badge row */}
+      <View style={aStyles.badgeRow}>
+        <View style={[aStyles.urgBadge, { borderColor: urgColor }]}>
+          <Text style={[aStyles.urgText, { color: urgColor }]}>{urg.toUpperCase()}</Text>
+        </View>
+        <View style={[aStyles.statusBadge, { borderColor: statusColor }]}>
+          <Text style={[aStyles.statusText, { color: statusColor }]}>{statusLabel}</Text>
+        </View>
+      </View>
+
+      {/* Action buttons */}
+      <View style={aStyles.btnRow}>
+        <TouchableOpacity style={aStyles.detailsBtn}
+          onPress={() => {
+            const urg    = (r.urgency || 'medium').toUpperCase();
+            const litres = r.liters_approved ?? r.liters_requested ?? 0;
+            const chain  = (r.approvalChain || [])
+              .map((s: any) => 'L' + s.level + ' ' + (s.approver?.name || s.name || '') + ': ' + (s.status || 'pending'))
+              .join('\n');
+            Alert.alert(
+              (r.site_name || r.site_id) + ' — ' + litres + ' L',
+              [
+                'Site ID: '      + r.site_id,
+                'Cluster: '      + (r.cluster || '—'),
+                'Cycle: '        + (r.cycle_key || '—'),
+                'Urgency: '      + urg,
+                'Status: '       + (r.status || '—').toUpperCase(),
+                'Approved L: '   + litres + ' L',
+                'XAF: '          + (litres * 828).toLocaleString(),
+                'Reason: '       + (r.request_reason || '—'),
+                chain ? ('\nApproval Chain:\n' + chain) : '',
+              ].filter(Boolean).join('\n'),
+              [
+                { text: 'Close', style: 'cancel' },
+                { text: 'Start Refueling', onPress: () => router.push({
+                    pathname: '/(technician)/refueling-flow/activate-site',
+                    params: { siteId: r.site_id, siteCode: r.site_id, siteName: r.site_name,
+                      fuelRequestId: r._id, approvedLiters: String(litres),
+                      currentFuelLevel: String(currentLevel ?? ''),
+                      tankCapacity: String(tankCapacity ?? '') }
+                  })
+                },
+              ],
+            );
+          }}
+        >
+          <FontAwesome5 name="info-circle" size={13} color={Colors.primary} />
+          <Text style={aStyles.detailsBtnText}>Details</Text>
+        </TouchableOpacity>
+
+        {(canStart || canResume) && (
+          <TouchableOpacity
+            style={[aStyles.startBtn, canResume && { backgroundColor: '#FEF3C7' }]}
+            onPress={() => router.push({
+              pathname: '/(technician)/refueling-flow/activate-site',
+              params: { siteId: r.site_id, siteCode: r.site_id, siteName: r.site_name,
+                fuelRequestId: r._id, approvedLiters: String(litres),
+                currentFuelLevel: String(currentLevel ?? ''),
+                tankCapacity: String(tankCapacity ?? '') }
+            })}
+          >
+            <FontAwesome5 name="play" size={11} color={canResume ? '#D97706' : '#fff'} />
+            <Text style={[aStyles.startBtnText, canResume && { color: '#D97706' }]}>
+              {canResume ? 'Resume' : 'Start Refueling'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function AssignmentSection({ assignments }: { assignments: any[] }) {
+  // Group by date
+  const groups: Record<string, any[]> = {};
+  for (const r of assignments) {
+    const raw = r.scheduled_date || r.visit_date || r.approved_at;
+    const key = raw ? new Date(raw).toISOString().split('T')[0] : 'Unscheduled';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(r);
+  }
+  const sorted = Object.entries(groups).sort(([a], [b]) => {
+    if (a === 'Unscheduled') return 1;
+    if (b === 'Unscheduled') return -1;
+    return new Date(a).getTime() - new Date(b).getTime();
+  });
+
+  return (
+    <View style={{ marginBottom: 8 }}>
+      <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 10, paddingHorizontal: 2 }}>
+        {'⛽ My Fuel Assignments (' + assignments.length + ')'}
+      </Text>
+      {sorted.map(([dateKey, reqs]) => (
+        <View key={dateKey}>
+          {/* Date header */}
+          <View style={aStyles.dateHeader}>
+            <FontAwesome5 name="calendar-alt" size={13} color={Colors.primary} />
+            <Text style={aStyles.dateText}>
+              {dateKey === 'Unscheduled'
+                ? 'Unscheduled'
+                : new Date(dateKey + 'T12:00:00').toLocaleDateString('en-US', {
+                    weekday: 'short', month: 'short', day: '2-digit', year: 'numeric',
+                  })}
+            </Text>
+            <View style={aStyles.dateBadge}>
+              <Text style={aStyles.dateBadgeText}>{reqs.length}</Text>
+            </View>
+          </View>
+          {reqs.map(r => <AssignmentCard key={r._id} r={r} />)}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const aStyles = StyleSheet.create({
+  card:        { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB', elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4 },
+  headerRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  fuelIndicatorSmall: { alignItems: 'center', minWidth: 60 },
+  fuelPctSmall: { fontSize: 18, fontWeight: '800', lineHeight: 22 },
+  fuelLabelSmall: { fontSize: 9, color: '#9CA3AF', marginTop: 1 },
+  tankText:    { fontSize: 12, color: '#6B7280', marginBottom: 10 },
+  siteName:    { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 2 },
+  siteId:      { fontSize: 12, color: '#6B7280', marginBottom: 10 },
+  litreBox:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF5F5', borderRadius: 10, padding: 12, marginBottom: 10 },
+  litreRow:    { flexDirection: 'row', alignItems: 'center' },
+  litreText:   { fontSize: 32, fontWeight: '900', color: Colors.primary },
+  xafText:     { fontSize: 12, color: Colors.primary, opacity: 0.7, marginTop: 2 },
+  ceoBadge:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#FFCDD2' },
+  ceoText:     { fontSize: 12, color: Colors.primary, fontWeight: '700' },
+  budgetRow:   { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  budgetText:  { fontSize: 12, color: '#6B7280' },
+  reason:      { fontSize: 13, color: '#374151', fontStyle: 'italic', marginBottom: 10, lineHeight: 18 },
+  badgeRow:    { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  urgBadge:    { borderRadius: 6, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1.5, backgroundColor: '#fff' },
+  urgText:     { fontSize: 12, fontWeight: '800' },
+  statusBadge: { borderRadius: 6, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1.5, backgroundColor: '#fff' },
+  statusText:  { fontSize: 12, fontWeight: '700' },
+  btnRow:      { flexDirection: 'row', gap: 10 },
+  detailsBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 },
+  detailsBtnText: { fontSize: 14, color: Colors.primary, fontWeight: '700' },
+  startBtn:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.primary, borderRadius: 8, paddingVertical: 12 },
+  startBtnText:{ fontSize: 14, color: '#fff', fontWeight: '800' },
+  dateHeader:  { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 2, marginBottom: 6 },
+  dateText:    { fontSize: 13, fontWeight: '700', color: '#374151', flex: 1 },
+  dateBadge:   { backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  dateBadgeText:{ fontSize: 11, fontWeight: '800', color: '#fff' },
+});
 
 export default function RefuelingScreen() {
   const { t } = useTranslation();
@@ -41,19 +297,28 @@ export default function RefuelingScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-
-  useEffect(() => { fetchSites(); }, []);
-  useFocusEffect(React.useCallback(() => { fetchSites(); }, []));
+  const [isOffline, setIsOffline] = useState(false);
+  const [assignmentsCount, setAssignmentsCount] = useState(0);
+  const [statusFilter,     setStatusFilter]     = useState<StatusFilter>("all");
+  const [fuelAssignments,  setFuelAssignments]  = useState<any[]>([]);
 
   const fetchSites = async () => {
     try {
       setLoading(true);
       console.log("🔄 [Refueling] fetchSites() called");
-      const response = await api.get<ApiResponse<Site[]>>("/technician/refuel/sites");
-      console.log("📡 [Refueling] HTTP status       :", response.status);
-      console.log("📦 [Refueling] sites count received:", response.data?.data?.length ?? 0);
-      const incoming: Site[] = response.data?.data ?? [];
+      // Cached: renders the last-known site list (scheduled AND unscheduled
+      // -- see the backend route below) immediately if offline, and
+      // silently refreshes + re-caches once connectivity returns.
+      const { data: response, fromCache } = await cachedGet<ApiResponse<Site[]>>("/technician/refuel/sites");
+      setIsOffline(fromCache);
+      console.log("📦 [Refueling] sites count received:", response?.data?.length ?? 0, fromCache ? "(from cache)" : "(fresh)");
+      try {
+        const { data: ar } = await cachedGet("/fuel-requests/scheduled-for-me");
+        const assignments  = ar?.data || [];
+        setAssignmentsCount(assignments.length);
+        setFuelAssignments(assignments);
+      } catch { /* no-op */ }
+      const incoming: Site[] = response?.data ?? [];
       if (incoming.length === 0) console.warn("⚠️  [Refueling] No sites returned from API");
       setSites(incoming);
     } catch (error: any) {
@@ -63,6 +328,11 @@ export default function RefuelingScreen() {
       setRefreshing(false);
     }
   };
+
+  useEffect(() => { fetchSites(); }, []);
+  useFocusEffect(React.useCallback(() => { fetchSites(); }, []));
+  // Whatever synced while offline now reflects on the server -- refresh automatically.
+  useSyncCompletion(fetchSites);
 
   const onRefresh = () => { setRefreshing(true); fetchSites(); };
 
@@ -77,14 +347,21 @@ export default function RefuelingScreen() {
     const selectable = sites.filter(
       (s) => s.workflow_status !== "completed" && s.refuel_submitted !== true
     );
-    const searched = q
-      ? selectable.filter(
-          (s) => s.name?.toLowerCase().includes(q) || s.site_id?.toLowerCase().includes(q)
-        )
-      : selectable;
-    if (statusFilter === "scheduled")   return searched.filter((s) => !!s.maintenanceId);
-    if (statusFilter === "unscheduled") return searched.filter((s) => !s.maintenanceId);
-    return searched;
+
+    // If searching, search ALL selectable sites and skip the tab filter
+    // entirely — same behavior as maintenance select-site.tsx. Previously
+    // this fell through to the scheduled/unscheduled filter below even
+    // while searching, so searching for an unscheduled site while on the
+    // "Scheduled" tab silently found nothing.
+    if (q) {
+      return selectable.filter(
+        (s) => s.name?.toLowerCase().includes(q) || s.site_id?.toLowerCase().includes(q)
+      );
+    }
+
+    if (statusFilter === "scheduled")   return selectable.filter((s) => !!s.maintenanceId);
+    if (statusFilter === "unscheduled") return selectable.filter((s) => !s.maintenanceId);
+    return selectable;
   }, [sites, searchQuery, statusFilter]);
 
   function groupByDate(list: Site[]): [string, Site[]][] {
@@ -129,19 +406,9 @@ export default function RefuelingScreen() {
     }
   }
 
-  function getFuelColor(pct: number) {
-    if (pct <= 10) return "#EF4444";
-    if (pct <= 25) return "#F59E0B";
-    if (pct <= 50) return "#3B82F6";
-    return "#22C55E";
-  }
-
-  function formatDate(iso?: string | null, fallback = "N/A") {
-    if (!iso) return fallback;
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return fallback;
-    return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
-  }
+  // getFuelColor and formatDate moved to module level (see above
+  // AssignmentCard) so both this component and AssignmentCard can use
+  // the same functions.
 
   function formatScheduled(iso?: string | null) {
     if (!iso) return "";
@@ -154,8 +421,6 @@ export default function RefuelingScreen() {
     );
   }
 
-  // ✅ Pass workflowId (if it exists on the site) so activate-site can
-  //    skip re-fetching and forward it directly to subsequent screens.
   const handleCardPress = (item: Site) => {
     router.push({
       pathname: "/(technician)/refueling-flow/activate-site",
@@ -167,7 +432,6 @@ export default function RefuelingScreen() {
         capacity:      item.tankCapacity?.toString()     ?? "5000",
         currentLevel:  item.currentFuelLevel?.toString() ?? "0",
         maintenanceId: item.maintenanceId  ?? "",
-        workflowId:    item.workflowId     ?? "",   // ✅ forward existing ID when available
       },
     });
   };
@@ -183,8 +447,21 @@ export default function RefuelingScreen() {
           <FontAwesome5 name="arrow-left" size={20} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t("refueling", "Refueling")}</Text>
-        <View style={{ width: 40 }} />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+
+          <TouchableOpacity style={[styles.hBtn, { backgroundColor: "rgba(183,28,28,0.85)" }]}
+            onPress={() => router.push("/(technician)/refueling-flow/request-fuel")}>
+            <FontAwesome5 name="plus" size={16} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <FontAwesome5 name="wifi" size={11} color="#92400E" />
+          <Text style={styles.offlineBannerText}>Offline — showing last saved sites</Text>
+        </View>
+      )}
 
       {/* Search */}
       <View style={styles.searchContainer}>
@@ -230,13 +507,18 @@ export default function RefuelingScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        {/* ── Fuel Request Assignments ── */}
+        {fuelAssignments.length > 0 && (
+          <AssignmentSection assignments={fuelAssignments} />
+        )}
+
         {grouped.length === 0 && !loading ? (
           <View style={styles.emptyState}>
             <FontAwesome5 name="tint-slash" size={48} color={Colors.textSecondary} />
             <Text style={styles.emptyText}>
               {searchQuery
                 ? t("no_results_for", `No results for "${searchQuery}"`)
-                : t("no_refueling_tasks", "No refueling tasks assigned")}
+                : t("no_refueling_tasks", "No sites available")}
             </Text>
           </View>
         ) : (
@@ -256,7 +538,8 @@ export default function RefuelingScreen() {
               {sitesForDate.map((item) => {
                 const { bg, fg } = getPriorityColors(item.priority);
                 const pct        = item.percentage ?? 0;
-                const fuelColor  = getFuelColor(pct);
+                const hasData    = item.hasFuelData !== false; // default true for older cached data without this field
+                const fuelColor  = hasData ? getFuelColor(pct) : "#9CA3AF";
 
                 return (
                   <TouchableOpacity
@@ -284,7 +567,9 @@ export default function RefuelingScreen() {
 
                       {/* Fuel % */}
                       <View style={styles.fuelIndicator}>
-                        <Text style={[styles.fuelPct, { color: fuelColor }]}>{pct}%</Text>
+                        <Text style={[styles.fuelPct, { color: fuelColor }]}>
+                          {hasData ? `${pct}%` : 'No data'}
+                        </Text>
                         <Text style={styles.fuelLabel}>Fuel Level</Text>
                       </View>
                     </View>
@@ -294,7 +579,7 @@ export default function RefuelingScreen() {
                       <View
                         style={[
                           styles.progressFill,
-                          { width: `${Math.min(pct, 100)}%` as any, backgroundColor: fuelColor },
+                          { width: `${hasData ? Math.min(pct, 100) : 0}%` as any, backgroundColor: fuelColor },
                         ]}
                       />
                     </View>
@@ -361,6 +646,12 @@ const styles = StyleSheet.create({
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "600" },
   backButton:  { padding: 4 },
 
+  offlineBanner: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "#FEF3C7", paddingVertical: 6, paddingHorizontal: 16,
+  },
+  offlineBannerText: { color: "#92400E", fontSize: 12, fontWeight: "500" },
+
   searchContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", marginHorizontal: 16, marginTop: 16, marginBottom: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB", height: 48 },
   searchIcon:      { marginRight: 10 },
   searchInput:     { flex: 1, height: "100%", color: "#111827", fontSize: 15 },
@@ -407,4 +698,10 @@ const styles = StyleSheet.create({
 
   emptyState: { paddingTop: 60, alignItems: "center" },
   emptyText:  { marginTop: 16, color: "#9CA3AF", textAlign: "center", fontSize: 14, lineHeight: 22 },
+  hBtn:       { width: 36, height: 36, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.2)", justifyContent: "center", alignItems: "center" },
+  hBadge:     { position: "absolute", top: -4, right: -4, backgroundColor: "#e53935", borderRadius: 8, minWidth: 16, height: 16, justifyContent: "center", alignItems: "center", paddingHorizontal: 3 },
+  hBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800" },
 });
+
+
+

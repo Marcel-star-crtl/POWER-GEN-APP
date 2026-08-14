@@ -1,12 +1,34 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { authEvents } from "./authEvents";
+import { secureAuthStorage } from "./secureAuthStorage";
+import { isNetworkAvailable } from "../hooks/useNetworkStatus";
 
-console.log("✅ api.ts loaded (uploader=fetch)");
+console.log("✅ api.ts loaded (uploader=fetch, offline-aware)");
 
-// export const SERVER_URL = "https://powergen-api-90kz.onrender.com";
+// SERVER_URL is read from EXPO_PUBLIC_API_URL at build time (Expo inlines
+// EXPO_PUBLIC_* vars automatically — no extra config needed). Falls back to
+// the production API if the env var isn't set.
+//
+// PREVIOUSLY: this was hardcoded to a developer's personal LAN IP
+// (192.168.1.137) with the production URL commented out above it — and
+// since no build profile in eas.json injected any override, that exact
+// same LAN-only address shipped in every build, including the production
+// app-bundle. The app was unreachable for any user not on that specific
+// developer's local WiFi network.
+//
+// For local development against a machine on your LAN, create a
+// `.env.local` file (already gitignored — see .gitignore's `.env*.local`)
+// with:
+//   EXPO_PUBLIC_API_URL=http://<your-machine-LAN-IP>:5000
+export const SERVER_URL =
+  process.env.EXPO_PUBLIC_API_URL || "https://powergen-api-wrr1.onrender.com";
 
-export const SERVER_URL = "http://192.168.1.198:5000";
+console.log(
+  process.env.EXPO_PUBLIC_API_URL
+    ? `🌐 API target: ${SERVER_URL} (from EXPO_PUBLIC_API_URL)`
+    : `🌐 API target: ${SERVER_URL} (default — set EXPO_PUBLIC_API_URL in .env.local to point at a different server, e.g. a local backend)`
+);
+
 const BASE_URL = `${SERVER_URL}/api`;
 
 export const api = axios.create({
@@ -17,11 +39,9 @@ export const api = axios.create({
 api.interceptors.request.use(
   async (config) => {
     try {
-      // Axios may create requests without an explicit headers object.
-      // Ensure it exists before we mutate it.
       config.headers = config.headers ?? ({} as any);
 
-      const token = await AsyncStorage.getItem("accessToken");
+      const token = await secureAuthStorage.getAccessToken();
       if (token) {
         const headers: any = config.headers;
         if (typeof headers.set === "function") {
@@ -29,62 +49,101 @@ api.interceptors.request.use(
         } else {
           headers.Authorization = `Bearer ${token}`;
         }
-        console.log("🔑 Request with token:", config.url);
-      } else {
-        console.log("⚠️ No token found for request:", config.url);
       }
 
       const isFormData =
         typeof FormData !== "undefined" && config.data instanceof FormData;
 
-      // Set Content-Type for JSON requests only (never for FormData)
       if (isFormData) {
         const headers: any = config.headers;
-        if (typeof headers.delete === "function") {
-          headers.delete("Content-Type");
-        } else {
-          delete headers["Content-Type"];
-        }
+        if (typeof headers.delete === "function") headers.delete("Content-Type");
+        else delete headers["Content-Type"];
       } else {
         const headers: any = config.headers;
-        if (typeof headers.set === "function") {
-          headers.set("Content-Type", "application/json");
-        } else {
-          headers["Content-Type"] = "application/json";
-        }
-      }
-
-      // Small targeted debug for uploads.
-      if (config.url && config.url.includes("/upload")) {
-        const headers: any = config.headers;
-        const contentType =
-          typeof headers.get === "function"
-            ? headers.get("Content-Type")
-            : headers["Content-Type"];
-        console.log("⬆️ Upload request debug:", {
-          url: config.url,
-          isFormData,
-          contentType,
-        });
+        if (typeof headers.set === "function") headers.set("Content-Type", "application/json");
+        else headers["Content-Type"] = "application/json";
       }
     } catch (error) {
       console.error("Error retrieving token:", error);
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  },
+  (error) => Promise.reject(error),
 );
+
+/**
+ * Tries to recover from a 401 before giving up on the session:
+ *  1. If a refresh token + /auth/refresh endpoint exist, use it.
+ *  2. Otherwise, try a silent re-login with the credentials cached at last sign-in.
+ * Returns true if the session was recovered (caller should retry the request).
+ */
+let recoveryInFlight: Promise<boolean> | null = null;
+
+async function attemptSessionRecovery(): Promise<boolean> {
+  if (recoveryInFlight) return recoveryInFlight;
+
+  recoveryInFlight = (async () => {
+    try {
+      const refreshToken = await secureAuthStorage.getRefreshToken();
+      if (refreshToken) {
+        try {
+          const res = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
+          const newToken = res.data?.data?.accessToken || res.data?.accessToken;
+          if (newToken) {
+            await secureAuthStorage.updateAccessToken(newToken);
+            return true;
+          }
+        } catch {
+          // no refresh endpoint, or it rejected — fall through to silent re-login
+        }
+      }
+
+      const creds = await secureAuthStorage.getCredentials();
+      if (creds) {
+        try {
+          const res = await axios.post(`${BASE_URL}/auth/login`, creds);
+          const data = res.data?.data;
+          if (data?.accessToken) {
+            await secureAuthStorage.setSession(data.accessToken, data.user, data.refreshToken);
+            return true;
+          }
+        } catch {
+          // credentials no longer valid server-side — genuinely logged out
+        }
+      }
+
+      return false;
+    } finally {
+      recoveryInFlight = null;
+    }
+  })();
+
+  return recoveryInFlight;
+}
 
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      // Handle token expiration/unauthorized
-      await AsyncStorage.removeItem("accessToken");
-      await AsyncStorage.removeItem("user");
-      authEvents.emit(); // Notify AuthContext to update state
+    const original = error.config;
+
+    if (error.response?.status === 401 && !original?._retried) {
+      // If we're offline, a 401 is meaningless right now (it won't have come
+      // from the server) — never log the user out for being offline.
+      const online = await isNetworkAvailable();
+      if (!online) return Promise.reject(error);
+
+      const recovered = await attemptSessionRecovery();
+      if (recovered && original) {
+        original._retried = true;
+        const token = await secureAuthStorage.getAccessToken();
+        original.headers = original.headers || {};
+        original.headers.Authorization = `Bearer ${token}`;
+        return api.request(original);
+      }
+
+      // Truly unauthenticated — clear session and notify the app.
+      await secureAuthStorage.clearSession();
+      authEvents.emit();
     }
     return Promise.reject(error);
   },
@@ -95,32 +154,14 @@ api.interceptors.response.use(
 // ============================================
 
 export const maintenanceAPI = {
-  // Get maintenance tasks for technician
   getTasks: (params?: { status?: string; page?: number; limit?: number }) =>
     api.get("/maintenance", { params }),
-
-  // Get single maintenance/task details
   getTask: (id: string) => api.get(`/maintenance/${id}`),
-
-  // Update maintenance record
-  updateMaintenance: (id: string, data: any) =>
-    api.patch(`/maintenance/${id}`, data),
-
-  // Update equipment check data
-  updateEquipmentCheck: (
-    maintenanceId: string,
-    equipmentType: string,
-    data: any,
-  ) =>
+  updateMaintenance: (id: string, data: any) => api.patch(`/maintenance/${id}`, data),
+  updateEquipmentCheck: (maintenanceId: string, equipmentType: string, data: any) =>
     api.patch(`/maintenance/${maintenanceId}/equipment/${equipmentType}`, data),
-
-  // Complete maintenance visit
-  completeMaintenance: (id: string, data: any) =>
-    api.post(`/maintenance/${id}/complete`, data),
-
-  // Save draft
-  saveDraft: (maintenanceId: string, data: any) =>
-    api.patch(`/maintenance/${maintenanceId}/draft`, data),
+  completeMaintenance: (id: string, data: any) => api.post(`/maintenance/${id}/complete`, data),
+  saveDraft: (maintenanceId: string, data: any) => api.patch(`/maintenance/${maintenanceId}/draft`, data),
 };
 
 // ============================================
@@ -128,16 +169,9 @@ export const maintenanceAPI = {
 // ============================================
 
 export const siteAPI = {
-  // Get site details including equipment and generators
   getSiteDetails: (siteId: string) => api.get(`/sites/${siteId}`),
-
-  // Get site equipment list
   getSiteEquipment: (siteId: string) => api.get(`/sites/${siteId}/equipment`),
-
-  // Get site with generators by IHS_ID_SITE (site ID)
   getSiteWithGenerators: (ihsIdSite: string) => api.get(`/sites/${ihsIdSite}`),
-
-  // Get specific generator details
   getGenerator: (generatorId: string) => api.get(`/generators/${generatorId}`),
 };
 
@@ -147,16 +181,11 @@ export const siteAPI = {
 
 export const operationsAPI = {
   getSites: () => api.get("/operations/sites"),
-  listAudits: (params?: {
-    status?: string;
-    siteId?: string;
-    page?: number;
-    limit?: number;
-  }) => api.get("/operations/audits", { params }),
+  listAudits: (params?: { status?: string; siteId?: string; page?: number; limit?: number }) =>
+    api.get("/operations/audits", { params }),
   getAudit: (id: string) => api.get(`/operations/audits/${id}`),
   createAudit: (data: any) => api.post("/operations/audits", data),
-  updateAudit: (id: string, data: any) =>
-    api.put(`/operations/audits/${id}`, data),
+  updateAudit: (id: string, data: any) => api.put(`/operations/audits/${id}`, data),
   updateAuditStatus: (id: string, status: string) =>
     api.patch(`/operations/audits/${id}/status`, { status }),
 };
@@ -170,7 +199,7 @@ export const uploadAPI = {
 
   uploadFormData: async (formData: FormData) => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const token = await AsyncStorage.getItem("accessToken");
+    const token = await secureAuthStorage.getAccessToken();
     const headers: Record<string, string> = {
       Accept: "application/json",
     };
@@ -212,9 +241,11 @@ export const uploadAPI = {
             (typeof raw === "string" && raw) ||
             undefined;
 
-          // Retry transient server responses.
+          // Retry transient server responses, including upstream timeouts
+          // (e.g. a slow Cloudinary upload) if your /api/upload route
+          // forwards that status code literally.
           if (
-            (res.status >= 500 || res.status === 429) &&
+            (res.status >= 500 || res.status === 429 || res.status === 408 || res.status === 499) &&
             attempt < maxRetries
           ) {
             const backoff = 400 * Math.pow(2, attempt);
@@ -272,9 +303,8 @@ export const uploadAPI = {
   uploadMultiple: async (
     files: { uri: string; type: string; name: string }[],
   ) => {
-    [];
     const formData = new FormData();
-    files.forEach((file, index) => {
+    files.forEach((file) => {
       formData.append("files", {
         uri: file.uri,
         type: file.type,
@@ -346,7 +376,6 @@ export const uploadAPI = {
         try {
           console.log("⬆️ Uploading photo:", obj.uri);
 
-          // Direct upload - create FormData properly for React Native
           const formData = new FormData();
           formData.append("file", {
             uri: obj.uri,
@@ -354,12 +383,6 @@ export const uploadAPI = {
             name:
               obj.name || obj.uri.split("/").pop() || `photo_${Date.now()}.jpg`,
           } as any);
-
-          console.log("⬆️ Upload payload:", {
-            uri: obj.uri,
-            type: normalizeMimeType(obj.type, obj.name || obj.uri),
-            name: obj.name || "auto",
-          });
 
           const uploadRes = await uploadAPI.uploadFormData(formData);
 
@@ -380,7 +403,6 @@ export const uploadAPI = {
             responseData,
           });
 
-          // Throw error to prevent saving invalid file:// URIs
           const serverMessage =
             (typeof responseData === "string" && responseData) ||
             responseData?.error ||
@@ -419,3 +441,4 @@ export const uploadAPI = {
     return processRecursive(data);
   },
 };
+

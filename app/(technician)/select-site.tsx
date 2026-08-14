@@ -14,7 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Card } from "../../components/ui/Card";
 import { LoadingOverlay } from "../../components/ui/LoadingOverlay";
 import { Colors } from "../../constants/Colors";
-import { api } from "../../services/api";
+import { cachedGet } from "../../services/offlineApi";
+import { useSyncCompletion } from "../../hooks/useSyncCompletion";
 
 interface SiteItem {
   IHS_ID_SITE: string;
@@ -36,43 +37,39 @@ export default function SelectSite() {
   }>();
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "pending" | "in_progress" | "completed"
   >("pending");
 
+  const fetchSites = async () => {
+    try {
+      setLoading(true);
+      // Cached: shows the last-loaded site list immediately when offline,
+      // and silently refreshes + re-caches whenever a connection is available.
+      const { data: response, fromCache } = await cachedGet("/technician/sites");
+      setIsOffline(fromCache);
+      const list: SiteItem[] = response?.data || [];
+      setSites(list);
+      console.log("✅ SelectSite loaded sites:", list.length, fromCache ? "(from cache)" : "(fresh)");
+    } catch (error: any) {
+      console.error(
+        "❌ Failed to load sites:",
+        error.response?.data || error.message,
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchSites = async () => {
-      try {
-        setLoading(true);
-        const response = await api.get("/technician/sites");
-        const list: SiteItem[] = response?.data?.data || [];
-        setSites(list);
-        console.log("✅ SelectSite loaded sites:", list.length);
-      } catch (error: any) {
-        console.error(
-          "❌ Failed to load sites:",
-          error.response?.data || error.message,
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchSites();
   }, []);
 
-  // Compute scheduledSites and allSites separately
-  const scheduledSites = useMemo(() => {
-    return sites.filter((s) => {
-      const status = s.next_maintenance?.status?.toLowerCase();
-      const type = s.next_maintenance?.type?.toUpperCase();
-      // Exclude refueling (RF) from preventive maintenance
-      if (type === "RF") return false;
-      return (
-        status === "pending" || status === "scheduled" || status === "approved"
-      );
-    });
-  }, [sites]);
+  // Whatever synced while offline (e.g. a completed visit at this site)
+  // now reflects on the server -- refresh automatically.
+  useSyncCompletion(fetchSites);
 
   const filteredSites = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -106,35 +103,9 @@ export default function SelectSite() {
     });
   }, [sites, query, statusFilter]);
 
-  // const handleSelect = (site: SiteItem) => {
-  //   console.log(
-  //     "🏢 Selected site:",
-  //     site.Site_Name,
-  //     site.IHS_ID_SITE,
-  //     "Maintenance ID:",
-  //     site.next_maintenance?.maintenance_id,
-  //   );
-
-  //   const maintenanceId = site.next_maintenance?.maintenance_id || "";
-
-  //   // Always route through activate-site to begin the workflow
-  //   router.push({
-  //     pathname: "/(technician)/maintenance-flow/activate-site",
-  //     params: {
-  //       maintenanceId,
-  //       siteId: site.IHS_ID_SITE,
-  //       siteName: site.Site_Name,
-  //       visitDate: site.next_maintenance?.date
-  //         ? String(site.next_maintenance.date)
-  //         : "",
-  //     },
-  //   });
-  // };
-
   const handleSelect = (site: SiteItem) => {
     const maintenanceId = site.next_maintenance?.maintenance_id || "";
 
-    // If called from a non-maintenance flow (nextPath param present), honour it
     if (params.nextPath) {
       const basePath = decodeURIComponent(params.nextPath);
       const separator = basePath.includes("?") ? "&" : "?";
@@ -145,7 +116,6 @@ export default function SelectSite() {
       return;
     }
 
-    // Default: always route through activate-site for the maintenance workflow
     router.push({
       pathname: "/(technician)/maintenance-flow/activate-site",
       params: {
@@ -173,6 +143,15 @@ export default function SelectSite() {
         <Text style={styles.headerTitle}>{t("select_site")}</Text>
         <View style={{ width: 40 }} />
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <FontAwesome5 name="wifi" size={12} color="#92400E" />
+          <Text style={styles.offlineBannerText}>
+            Offline — showing last saved sites
+          </Text>
+        </View>
+      )}
 
       <View style={styles.searchRow}>
         <TextInput
@@ -243,7 +222,6 @@ export default function SelectSite() {
         {filteredSites.length === 0 && !loading ? (
           <Text style={styles.emptyText}>{t("no_sites_found")}</Text>
         ) : (
-          // Group sites by scheduled_date if available, otherwise fallback to date (YYYY-MM-DD)
           Object.entries(
             filteredSites.reduce(
               (acc, site) => {
@@ -261,7 +239,6 @@ export default function SelectSite() {
                       ? new Date(mainDate)
                       : mainDate;
                 }
-                // Format date as YYYY-MM-DD
                 const dateKey = dateObj
                   ? dateObj.toLocaleDateString("en-CA", {
                       year: "numeric",
@@ -288,7 +265,6 @@ export default function SelectSite() {
                       style={styles.dateIcon}
                     />
                     <Text style={styles.dateText}>
-                      {/* Format date as e.g. Feb 04, 2026 */}
                       {dateKey !== "No Date"
                         ? new Date(dateKey).toLocaleDateString("en-US", {
                             year: "numeric",
@@ -320,13 +296,11 @@ export default function SelectSite() {
                       </View>
                       <Text style={styles.siteId}>{item.IHS_ID_SITE}</Text>
                       <View style={styles.maintenanceRow}>
-                        {/* Maintenance Type */}
                         {item.next_maintenance?.type && (
                           <Text style={styles.maintenanceType}>
                             {item.next_maintenance.type}
                           </Text>
                         )}
-                        {/* Priority Badge */}
                         {item.next_maintenance?.priority && (
                           <View
                             style={[
@@ -378,6 +352,15 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.text,
   },
+  offlineBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FEF3C7",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  offlineBannerText: { color: "#92400E", fontSize: 12, fontWeight: "500" },
   searchRow: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -506,3 +489,10 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 });
+
+
+
+
+
+
+

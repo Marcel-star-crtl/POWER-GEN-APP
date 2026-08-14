@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "../../../constants/Colors";
 import { useAuth } from "../../../context/AuthContext";
-import { api } from "../../../services/api";
+import { cachedGet } from "../../../services/offlineApi";
 import { ApiResponse } from "../../../types/common.types";
 import { Maintenance } from "../../../types/maintenance.types";
 import { isRestrictedAcScopeRole } from "../../../utils/roles";
@@ -24,16 +24,18 @@ export default function MaintenanceList() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isOffline, setIsOffline] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
 
   const fetchTasks = async () => {
     try {
-      const response = await api.get<ApiResponse<Maintenance[]>>(
+      const { data: response, fromCache } = await cachedGet<ApiResponse<Maintenance[]>>(
         "/technician/maintenance/tasks",
       );
-      if (response.data.data) {
-        const items = response.data.data;
+      setIsOffline(fromCache);
+      if (response.data) {
+        const items = response.data;
         const filtered = isRestrictedAcScopeRole(user?.role)
           ? items.filter((item: any) =>
               ["shelter", "cleaning"].includes(item.check_type),
@@ -71,19 +73,19 @@ export default function MaintenanceList() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "scheduled":
-        return "#3B82F6"; // Blue for scheduled
+        return "#3B82F6";
       case "approved":
-        return Colors.success; // Green for approved
+        return Colors.success;
       case "in_progress":
-        return "#F97316"; // Orange
+        return "#F97316";
       case "pending_approval":
-        return "#EAB308"; // Yellow
+        return "#EAB308";
       case "completed":
-        return Colors.success; // Green
+        return Colors.success;
       case "rejected":
-        return Colors.danger; // Red
+        return Colors.danger;
       case "draft":
-        return "#94A3B8"; // Gray for draft
+        return "#94A3B8";
       default:
         return Colors.textSecondary;
     }
@@ -179,6 +181,12 @@ export default function MaintenanceList() {
         <Text style={styles.title}>My Maintenance Tasks</Text>
       </View>
 
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>Offline — showing last saved tasks</Text>
+        </View>
+      )}
+
       <View style={styles.searchContainer}>
         <Ionicons
           name="search"
@@ -229,6 +237,12 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: Colors.text,
   },
+  offlineBanner: {
+    backgroundColor: "#FEF3C7",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  offlineBannerText: { color: "#92400E", fontSize: 12, fontWeight: "500" },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -359,3 +373,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 });
+
+
+
+

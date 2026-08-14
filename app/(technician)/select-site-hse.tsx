@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "../../constants/Colors";
-import { api } from "../../services/api";
+import { cachedGet } from "../../services/offlineApi";
 
 interface SiteItem {
   IHS_ID_SITE: string;
@@ -24,14 +24,16 @@ export default function SelectSiteHSE() {
   const { t } = useTranslation();
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
     const fetchSites = async () => {
       try {
         setLoading(true);
-        const response = await api.get("/technician/sites");
-        setSites(response?.data?.data || []);
+        const { data: response, fromCache } = await cachedGet("/technician/sites");
+        setIsOffline(fromCache);
+        setSites(response?.data || []);
       } catch (error) {
         console.error("Failed to load sites", error);
       } finally {
@@ -62,6 +64,13 @@ export default function SelectSiteHSE() {
         </View>
         <View style={{ width: 32 }} />
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Ionicons name="cloud-offline-outline" size={14} color="#92400E" />
+          <Text style={styles.offlineBannerText}>Offline — showing last saved sites</Text>
+        </View>
+      )}
 
       <View style={styles.searchContainer}>
         <Ionicons
@@ -154,6 +163,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   subtitle: { fontSize: 12, color: Colors.textSecondary, textAlign: "center" },
+  offlineBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FEF3C7",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  offlineBannerText: { color: "#92400E", fontSize: 12, fontWeight: "500" },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -197,3 +215,9 @@ const styles = StyleSheet.create({
   siteName: { fontSize: 15, fontWeight: "600", color: Colors.text },
   siteId: { marginTop: 2, fontSize: 12, color: Colors.textSecondary },
 });
+
+
+
+
+
+

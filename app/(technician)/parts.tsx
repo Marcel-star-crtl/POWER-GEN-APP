@@ -15,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { Colors } from "../../constants/Colors";
 import { Card } from "../../components/ui/Card";
-import { api } from "../../services/api";
+import { cachedGet } from "../../services/offlineApi";
 import { Part, PartRequest } from "../../types/parts.types";
 import { ApiResponse } from "../../types/common.types";
 import { format } from "date-fns";
@@ -32,6 +32,7 @@ export default function PartsScreen() {
   const [parts, setParts] = useState<Part[]>([]);
   const [requests, setRequests] = useState<PartRequest[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     if (activeTab === "catalog") fetchParts();
@@ -41,10 +42,14 @@ export default function PartsScreen() {
   const fetchParts = async () => {
     try {
       setLoading(true);
-      const response = await api.get<ApiResponse<Part[]>>("/parts", {
-        params: { search: searchQuery, status: "active" },
-      });
-      if (response.data.data) setParts(response.data.data);
+      // Cached so the catalog still browses offline (search is client-side
+      // once loaded, so this only affects the initial params-based fetch).
+      const { data: response, fromCache } = await cachedGet<ApiResponse<Part[]>>(
+        "/parts",
+        { search: searchQuery, status: "active" },
+      );
+      setIsOffline(fromCache);
+      if (response.data) setParts(response.data);
     } catch (error) {
       console.error("Error fetching parts:", error);
       Alert.alert(t("error", "Error"), t("failed_load_parts", "Failed to load parts catalog"));
@@ -56,8 +61,11 @@ export default function PartsScreen() {
   const fetchRequests = async () => {
     try {
       setLoading(true);
-      const response = await api.get<ApiResponse<PartRequest[]>>("/parts/requests/my");
-      if (response.data.data) setRequests(response.data.data);
+      const { data: response, fromCache } = await cachedGet<ApiResponse<PartRequest[]>>(
+        "/parts/requests/my",
+      );
+      setIsOffline(fromCache);
+      if (response.data) setRequests(response.data);
     } catch (error) {
       console.error("Error fetching requests:", error);
       Alert.alert(t("error", "Error"), t("failed_load_requests", "Failed to load request history"));
@@ -262,6 +270,13 @@ export default function PartsScreen() {
         <View style={{ width: 40 }} />
       </View>
 
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <FontAwesome5 name="wifi" size={11} color="#92400E" />
+          <Text style={styles.offlineBannerText}>Offline — showing last saved data</Text>
+        </View>
+      )}
+
       <View style={styles.content}>
         {/* Main tabs */}
         <View style={styles.tabs}>
@@ -377,6 +392,15 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "600" },
   backButton: { padding: 4 },
+  offlineBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FEF3C7",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  offlineBannerText: { color: "#92400E", fontSize: 12, fontWeight: "500" },
   content: { flex: 1 },
   searchContainer: {
     flexDirection: "row",
@@ -454,6 +478,10 @@ const styles = StyleSheet.create({
   emptyContainer: { alignItems: "center", marginTop: 48 },
   emptyText: { marginTop: 16, color: Colors.textSecondary, fontSize: 16 },
 });
+
+
+
+
 
 
 

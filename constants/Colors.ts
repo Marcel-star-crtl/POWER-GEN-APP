@@ -8,6 +8,7 @@ export const Colors = {
   error: '#b71c1c', // Alias for danger
   background: '#f4f4f4', // Light Gray (logo background)
   surface: '#ffffff', // White
+  white: '#ffffff', // Alias for surface — used directly as Colors.white in several components
   text: '#222222', // Strong text (logo text)
   textSecondary: '#757575', // Muted gray
   border: '#e0e0e0', // Light border

@@ -1,13 +1,21 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Colors } from '../../constants/Colors';
 import { FontAwesome5 } from '@expo/vector-icons';
+import { changeLanguage, SUPPORTED_LANGUAGES, SupportedLanguage } from '../../i18n';
+
+const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
+  en: 'English',
+  fr: 'Français',
+};
 
 export default function Profile() {
   const { user, signOut } = useAuth();
+  const { t, i18n } = useTranslation();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -23,7 +31,7 @@ export default function Profile() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Contact Information</Text>
+          <Text style={styles.sectionTitle}>{t('contact_information', 'Contact Information')}</Text>
           <View style={styles.infoRow}>
             <FontAwesome5 name="envelope" size={16} color={Colors.textSecondary} style={{ width: 24 }} />
             <Text style={styles.infoText}>{user?.email}</Text>
@@ -35,10 +43,33 @@ export default function Profile() {
             </View>
           )}
         </View>
-        
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{t('language', 'Language')}</Text>
+          <View style={styles.languageRow}>
+            {SUPPORTED_LANGUAGES.map((lang) => {
+              const active = i18n.language === lang;
+              return (
+                <TouchableOpacity
+                  key={lang}
+                  onPress={() => changeLanguage(lang)}
+                  style={[styles.languageOption, active && styles.languageOptionActive]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.languageOptionText, active && styles.languageOptionTextActive]}>
+                    {LANGUAGE_LABELS[lang]}
+                  </Text>
+                  {active && <FontAwesome5 name="check" size={14} color="#fff" />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
         <View style={styles.section}>
           <Button variant="danger" onPress={signOut} style={styles.logoutButton}>
-            Sign Out
+            {t('sign_out', 'Sign Out')}
           </Button>
         </View>
       </ScrollView>
@@ -108,5 +139,32 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     width: '100%',
-  }
+  },
+  languageRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  languageOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: '#fff',
+  },
+  languageOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  languageOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  languageOptionTextActive: {
+    color: '#fff',
+  },
 });

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Colors } from '../../constants/Colors';
-import { api } from '../../services/api';
+import { cachedGet } from '../../services/offlineApi';
 import { useTranslation } from 'react-i18next';
 
 interface SiteItem {
@@ -15,14 +15,16 @@ export default function SelectSiteAudit() {
   const { t } = useTranslation();
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [query, setQuery] = useState('');
 
   useEffect(() => {
     const fetchSites = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/technician/sites');
-        setSites(response?.data?.data || []);
+        const { data: response, fromCache } = await cachedGet('/technician/sites');
+        setIsOffline(fromCache);
+        setSites(response?.data || []);
       } catch (error) {
         // handle error
       } finally {
@@ -40,6 +42,11 @@ export default function SelectSiteAudit() {
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>{t('select_site_for_audit')}</Text>
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>Offline — showing last saved sites</Text>
+        </View>
+      )}
       <TextInput
         style={styles.input}
         placeholder={t('search_site_name_or_id')}
@@ -78,6 +85,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     color: Colors.text,
   },
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginBottom: 12,
+  },
+  offlineBannerText: { color: '#92400E', fontSize: 12, fontWeight: '500' },
   input: {
     borderWidth: 1,
     borderColor: Colors.border,
@@ -107,3 +122,4 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 });
+

@@ -10,7 +10,7 @@ import {
   ScrollView,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { maintenanceWorkflowAPI } from "../../../services/maintenanceWorkflowAPI";
+import { patchMaintenanceWorkflowStatus } from "../../../services/offlineMaintenanceWorkflow";
 import { Colors } from "../../../constants/Colors";
 import { FontAwesome5 } from "@expo/vector-icons";
 
@@ -26,21 +26,26 @@ export default function MaintenanceCheckoutSiteScreen() {
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
-    if (!params.workflowId) {
-      Alert.alert("Error", "Workflow ID missing.");
+    const maintenanceId = params.workflowId || params.maintenanceId;
+    if (!maintenanceId) {
+      Alert.alert("Error", "Maintenance task ID missing.");
       return;
     }
 
     try {
       setLoading(true);
 
-      await maintenanceWorkflowAPI.updateStatus(params.workflowId, "checked_out", {
+      // Always succeeds locally, online or offline -- updates the local
+      // workflow cache immediately and queues the server PATCH against the
+      // real endpoint (workflowId === maintenanceId, always a valid,
+      // pre-existing server ID -- no client-id resolution needed here).
+      await patchMaintenanceWorkflowStatus(maintenanceId, "checked_out", {
         checkedOutAt: new Date().toISOString(),
       });
 
       console.log(
-        "[MaintenanceCheckout] Patched checked_out, workflowId:",
-        params.workflowId
+        "[MaintenanceCheckout] Patched checked_out, maintenanceId:",
+        maintenanceId
       );
 
       Alert.alert(
@@ -54,6 +59,9 @@ export default function MaintenanceCheckoutSiteScreen() {
         ]
       );
     } catch (err: any) {
+      // patchMaintenanceWorkflowStatus itself doesn't throw for
+      // connectivity reasons -- this only fires for a genuine unexpected
+      // error, so it's safe to surface here.
       console.error("[MaintenanceCheckout] error:", err?.message);
       Alert.alert("Error", "Failed to save checkout.");
     } finally {
@@ -147,3 +155,10 @@ const styles = StyleSheet.create({
   cancelBtn: { paddingVertical: 12 },
   cancelText: { color: "#6B7280", fontSize: 15 },
 });
+
+
+
+
+
+
+

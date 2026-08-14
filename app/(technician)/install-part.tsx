@@ -7,15 +7,14 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
+import { FontAwesome5 } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { api, uploadAPI } from '../../services/api';
+import { submitOrQueue } from '../../services/offlineApi';
 
 export default function PartInstallationScreen() {
   const params = useLocalSearchParams<{ 
@@ -58,8 +57,7 @@ export default function PartInstallationScreen() {
 
     try {
         setLoading(true);
-        // In a real app, photos would be uploaded here using uploadAPI
-        
+
         const payload = {
             requestId: params.requestId,
             part_name: params.partName,
@@ -75,13 +73,15 @@ export default function PartInstallationScreen() {
             notes: notes
         };
 
-        const response = await api.post('/technician/install-part', payload);
+        const result = await submitOrQueue('install_part', '/technician/install-part', 'POST', payload);
 
-        if (response.data.success) {
-            Alert.alert('Success', 'Part installation recorded successfully', [
-                { text: 'OK', onPress: () => router.back() }
-            ]);
-        }
+        Alert.alert(
+          'Success',
+          result.queued
+            ? 'No connection — saved and will sync automatically.'
+            : 'Part installation recorded successfully',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
     } catch (error: any) {
         Alert.alert('Error', error.response?.data?.error || 'Failed to submit installation data');
     } finally {
@@ -238,11 +238,13 @@ export default function PartInstallationScreen() {
         </Card>
 
         <Button 
-            title={loading ? "Submitting..." : "Complete Installation"} 
             onPress={handleSubmit} 
             style={styles.submitButton}
             disabled={loading}
-        />
+            loading={loading}
+        >
+            {loading ? "Submitting..." : "Complete Installation"}
+        </Button>
         <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
@@ -275,7 +277,7 @@ const styles = StyleSheet.create({
   },
   approvedCard: {
     marginBottom: 16,
-    backgroundColor: '#F0FDF4', // Light green
+    backgroundColor: '#F0FDF4',
     borderColor: Colors.success,
     borderWidth: 1,
   },
@@ -421,3 +423,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.success,
   }
 });
+
+
+
