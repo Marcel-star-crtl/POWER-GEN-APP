@@ -21,10 +21,12 @@ import {
 import { Colors } from "../../../constants/Colors";
 import { getWorkflow, patchWorkflowStatus } from "../../../services/offlineWorkflow";
 import { cacheGet, cacheSet } from "../../../lib/syncQueue";
+import { useAutoSaveDraft } from "../../../hooks/useAutoSaveDraft";
 import {
   checkOutSite,
   getCurrentVisit,
 } from "../../../services/siteVisit";
+import { useAuth } from "../../../context/AuthContext";
 
 // NOTE: photos are no longer uploaded here — they stay as local file:// URIs
 // in the payload handed to the summary screen. submitOrQueue (called from
@@ -34,6 +36,7 @@ import {
 
 export default function RefuelFormScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const { siteId, siteName, checked_out } = useLocalSearchParams();
   console.log('[RefuelForm] siteId:', siteId);
   // ── Photo states ──────────────────────────────────────────────────────────
@@ -61,12 +64,24 @@ export default function RefuelFormScreen() {
   // ── Measurement fields ────────────────────────────────────────────────────
   const [dipStickBefore, setDipStickBefore] = useState("");
   const [dipStickAfter, setDipStickAfter] = useState("");
-  // ── Truck Flow Meter fields COMMENTED OUT ────────────────────────────────
-  // These duplicate data already captured in the Diesel Information section.
-  // Dip Stick measurements (below) are the authoritative tank-level capture.
-  // const [truckFlowMeterBefore, setTruckFlowMeterBefore] = useState("");
-  // const [truckFlowMeterAfter, setTruckFlowMeterAfter] = useState("");
+  // ── Truck Flow Meter fields ───────────────────────────────────────────────
+  // Previously commented out as "duplicating" Fuel Found / Fuel Added, but
+  // the WhatsApp share report (utils/formatRefuelWhatsAppMessage.ts) needs
+  // the truck's own flow-meter reading as a distinct figure from the
+  // Diesel Information section's tank-side numbers — restored as real,
+  // optional inputs rather than reusing Fuel Found/Added for both.
+  const [truckFlowMeterBefore, setTruckFlowMeterBefore] = useState("");
+  const [truckFlowMeterAfter, setTruckFlowMeterAfter] = useState("");
   const [truckPlateNumber, setTruckPlateNumber] = useState("");
+
+  // ── Refueling start/end time (optional) ───────────────────────────────────
+  // Distinct from Visit Date & Time below (when the technician was on
+  // site, filling this form) — this is when the truck actually started
+  // and finished delivering fuel, both sharing the same visit date. Only
+  // collected because the WhatsApp share report's "Planifier" section
+  // asks for it explicitly.
+  const [refuelStartTime, setRefuelStartTime] = useState("");
+  const [refuelEndTime, setRefuelEndTime] = useState("");
 
   // ── Guard fields ──────────────────────────────────────────────────────────
   const [guardName, setGuardName] = useState("");
@@ -160,6 +175,8 @@ export default function RefuelFormScreen() {
   function buildDraftPayload() {
     return {
       dipStickBefore, dipStickAfter, truckPlateNumber,
+      truckFlowMeterBefore, truckFlowMeterAfter,
+      refuelStartTime, refuelEndTime,
       guardName, guardNumber, showGuard,
       tankObservations, fuelSensorStatus,
       visitDate, visitTime,
@@ -193,6 +210,18 @@ export default function RefuelFormScreen() {
     try { await cacheSet(draftKey, null); } catch { /* non-fatal */ }
   }
 
+  // Periodic silent local autosave (every 2 min) — same local cache write as
+  // the "Save Draft" button (handleSaveDraft), minus the confirmation Alert.
+  // Protects in-progress entries even if the technician never taps Save
+  // Draft themselves. See hooks/useAutoSaveDraft.ts for the full rationale.
+  useAutoSaveDraft(
+    async () => {
+      await cacheSet(draftKey, buildDraftPayload());
+      setDraftSavedAt(Date.now());
+    },
+    { enabled: !loading && !!siteId },
+  );
+
   // Offer to restore an existing draft for this site on mount.
   useEffect(() => {
     if (!siteId) return;
@@ -201,17 +230,37 @@ export default function RefuelFormScreen() {
         const cached = await cacheGet<ReturnType<typeof buildDraftPayload> | null>(draftKey);
         const draft = cached?.data;
         if (!draft) return;
+        // A draft saved with deliveryComplete === false means the technician
+        // left to fetch more fuel ("I'll Return to Finish") rather than just
+        // closing the form mid-entry. The generator may have kept running
+        // while they were away, so the physical readings taken AT THE TANK
+        // (dip stick, truck flow meter, current meter) would be stale if
+        // restored verbatim — unlike every other field here, which is safe
+        // to bring back exactly as typed.
+        const isPartialDeliveryResume = draft.deliveryComplete === false;
         Alert.alert(
           t("draft_found", "Draft Found"),
-          t("draft_found_message", "You have a saved draft for this site. Restore it?"),
+          isPartialDeliveryResume
+            ? t(
+                "draft_found_partial_message",
+                "You have a saved draft for this site from a return visit. Restore it? Dip stick, flow meter and meter readings will come back blank since the generator may have kept running while you were away."
+              )
+            : t("draft_found_message", "You have a saved draft for this site. Restore it?"),
           [
             { text: t("discard", "Discard"), style: "destructive", onPress: () => clearDraft() },
             {
               text: t("restore", "Restore"),
               onPress: () => {
-                if (draft.dipStickBefore   != null) setDipStickBefore(draft.dipStickBefore);
-                if (draft.dipStickAfter    != null) setDipStickAfter(draft.dipStickAfter);
+                if (!isPartialDeliveryResume) {
+                  if (draft.dipStickBefore != null) setDipStickBefore(draft.dipStickBefore);
+                  if (draft.dipStickAfter != null) setDipStickAfter(draft.dipStickAfter);
+                  if (draft.truckFlowMeterBefore != null) setTruckFlowMeterBefore(draft.truckFlowMeterBefore);
+                  if (draft.truckFlowMeterAfter != null) setTruckFlowMeterAfter(draft.truckFlowMeterAfter);
+                  if (draft.currMeter != null) setCurrMeter(draft.currMeter);
+                }
                 if (draft.truckPlateNumber != null) setTruckPlateNumber(draft.truckPlateNumber);
+                if (draft.refuelStartTime  != null) setRefuelStartTime(draft.refuelStartTime);
+                if (draft.refuelEndTime    != null) setRefuelEndTime(draft.refuelEndTime);
                 if (draft.guardName        != null) setGuardName(draft.guardName);
                 if (draft.guardNumber      != null) setGuardNumber(draft.guardNumber);
                 if (draft.showGuard        != null) setShowGuard(draft.showGuard);
@@ -225,7 +274,6 @@ export default function RefuelFormScreen() {
                 if (draft.tankLengthInput  != null) setTankLengthInput(draft.tankLengthInput);
                 if (draft.tankHeightInput  != null) setTankHeightInput(draft.tankHeightInput);
                 if (draft.tankWidthInput   != null) setTankWidthInput(draft.tankWidthInput);
-                if (draft.currMeter        != null) setCurrMeter(draft.currMeter);
                 if (draft.fuelFound        != null) setFuelFound(draft.fuelFound);
                 if (draft.fuelAdded        != null) setFuelAdded(draft.fuelAdded);
                 if (draft.comments         != null) setComments(draft.comments);
@@ -313,6 +361,29 @@ export default function RefuelFormScreen() {
   }, [currMeter, prevMeter, t]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+  // Auto-calculated fields (runningHours, fuelConsumed, currentTotal) are set
+  // to this literal placeholder string until their inputs exist (see the
+  // "Auto-calculations" effects above). Used to decide whether to show the
+  // calculated value or a plain-language hint explaining what's still needed —
+  // rather than showing the placeholder string itself inside a colored box
+  // styled as if it were a real result.
+  const isAutoCalcPending = (val: string) => val === t("auto_calculated", "Auto-calculated");
+
+  // Small "N remaining" / "Complete" chip shown in a FormSection's header via
+  // its new optional statusChip prop — lets a technician see a section's
+  // state without opening it, instead of only finding out what's missing
+  // after Submit fails. Reuses the same OK/pending colors as the calc boxes
+  // above for visual consistency rather than introducing a third palette.
+  const renderSectionChip = (remaining: number) => (
+    <View style={remaining === 0 ? styles.sectionChipDone : styles.sectionChipPending}>
+      <Text style={remaining === 0 ? styles.sectionChipTextDone : styles.sectionChipTextPending}>
+        {remaining === 0
+          ? t("complete", "Complete")
+          : t("n_remaining", "{{count}} remaining", { count: remaining })}
+      </Text>
+    </View>
+  );
+
   const toStr = (v: string): string | undefined =>
     v.trim() === "" ? undefined : v.trim();
 
@@ -475,9 +546,26 @@ export default function RefuelFormScreen() {
         fuel_sensor_status:     toStr(fuelSensorStatus),
         dip_stick_before_cm:    toNum(dipStickBefore),
         dip_stick_after_cm:     toNum(dipStickAfter),
-        // truck_flow_meter_before_l: toNum(truckFlowMeterBefore),  // COMMENTED — duplicates Diesel Information section
-        // truck_flow_meter_after_l:  toNum(truckFlowMeterAfter),   // COMMENTED — duplicates Diesel Information section
+        truck_flow_meter_before_l: toNum(truckFlowMeterBefore),
+        truck_flow_meter_after_l:  toNum(truckFlowMeterAfter),
         truck_plate_number:     toStr(truckPlateNumber),
+        refuel_start_time:      toStr(refuelStartTime),
+        refuel_end_time:        toStr(refuelEndTime),
+        // fse_name / planifier: the backend (models/FuelConsumption.js,
+        // routes/technicians.js POST /refuel) has had dedicated fields for
+        // these since before this change, but nothing in the mobile app
+        // ever actually sent them — they were always saved empty. fse_name
+        // is simply the logged-in technician; planifier stores the same
+        // start/end/planned scheduling info as the "Planifier" section of
+        // the WhatsApp share report (see refueling-flow/summary.tsx),
+        // collapsed into one string since the backend field isn't
+        // structured.
+        fse_name:               toStr(user?.fullName),
+        planifier:              toStr(
+          `Start time (date of refueling): ${visitDate} ${refuelStartTime || "-"}\n` +
+          `End time: ${visitDate} ${refuelEndTime || "-"}\n` +
+          `Date planned: ${visitDate}`
+        ),
         measurement_photos:     rawMeasurementPhotos.length > 0 ? rawMeasurementPhotos : undefined,
         // The shared fuel purchase this site's usage draws down — see the
         // useEffect above that reads it from the workflow.
@@ -667,6 +755,25 @@ export default function RefuelFormScreen() {
         style={errors.visitTime ? styles.inputError : undefined}
       />
       {errors.visitTime && <Text style={styles.errorText}>{errors.visitTime}</Text>}
+
+      <Text style={styles.helperNote}>
+        {t(
+          "refuel_timing_helper",
+          "Optional — when the truck actually started/finished delivering fuel (same day as the visit above).",
+        )}
+      </Text>
+      <InputField
+        label={t("refuel_start_time", "Refueling Start Time")}
+        value={refuelStartTime}
+        onChangeText={setRefuelStartTime}
+        placeholder="HH:mm"
+      />
+      <InputField
+        label={t("refuel_end_time", "Refueling End Time")}
+        value={refuelEndTime}
+        onChangeText={setRefuelEndTime}
+        placeholder="HH:mm"
+      />
     </FormSection>
   );
 
@@ -738,6 +845,11 @@ export default function RefuelFormScreen() {
     <FormSection
       title={t("measurement_information", "Measurement Information")}
       icon="analytics-outline"
+      statusChip={renderSectionChip(
+        [dipStickBefore, dipStickAfter, tankLengthInput, tankHeightInput, tankWidthInput].filter(
+          (v) => !v
+        ).length
+      )}
     >
       {/* ── Dip Stick Measurements — COMPULSORY ─────────────────────────── */}
       <View style={styles.requiredBanner}>
@@ -846,13 +958,24 @@ export default function RefuelFormScreen() {
         placeholder={t("truck_plate_placeholder", "e.g. LT 1234 AB")}
       />
 
-      {/* ── Truck Flow Meter — COMMENTED (duplicates Diesel Information) ───── */}
-      {/*
-        Truck Flow Meter Before (L) and Truck Flow Meter After (L) have been
-        removed from this form. The same data is already captured in the
-        "Diesel Information" section (Fuel Found / Fuel Added). Dip Stick
-        measurements above are the authoritative physical tank-level record.
-      */}
+      {/* ── Truck Flow Meter (optional) ──────────────────────────────────────
+          The truck's own flow-meter reading — distinct from Fuel Found/
+          Fuel Added in the Diesel Information section below, which is the
+          tank-side reading. Both are kept for the WhatsApp share report. */}
+      <InputField
+        label={t("truck_flow_meter_before", "Truck Flow Meter Before (L)")}
+        value={truckFlowMeterBefore}
+        onChangeText={setTruckFlowMeterBefore}
+        keyboardType="numeric"
+        placeholder={t("truck_flow_meter_before_placeholder", "e.g. 450")}
+      />
+      <InputField
+        label={t("truck_flow_meter_after", "Truck Flow Meter After (L)")}
+        value={truckFlowMeterAfter}
+        onChangeText={setTruckFlowMeterAfter}
+        keyboardType="numeric"
+        placeholder={t("truck_flow_meter_after_placeholder", "e.g. 0")}
+      />
 
       <PhotoCapture
         label={t("measurement_photos", "Measurement Photos (Optional)")}
@@ -892,39 +1015,48 @@ export default function RefuelFormScreen() {
       {errors.currMeter && (
         <Text style={styles.errorText}>{errors.currMeter}</Text>
       )}
-      <View
-        style={[
-          styles.calcBox,
-          runningHours.startsWith(t("error", "Error"))
-            ? styles.errorBox
-            : styles.successBox,
-        ]}
-      >
-        <Ionicons
-          name="trending-up"
-          size={20}
-          color={
-            runningHours.startsWith(t("error", "Error"))
-              ? Colors.danger
-              : Colors.success
-          }
-        />
-        <Text style={styles.calcLabel}>
-          {t("running_hours", "Running Hours")}
+      {isAutoCalcPending(runningHours) ? (
+        <Text style={styles.pendingHint}>
+          {t(
+            "running_hours_pending",
+            "Running hours will appear here once you enter a current meter reading above."
+          )}
         </Text>
-        <Text
+      ) : (
+        <View
           style={[
-            styles.calcValue,
-            {
-              color: runningHours.startsWith(t("error", "Error"))
-                ? Colors.danger
-                : Colors.success,
-            },
+            styles.calcBox,
+            runningHours.startsWith(t("error", "Error"))
+              ? styles.errorBox
+              : styles.successBox,
           ]}
         >
-          {runningHours}
-        </Text>
-      </View>
+          <Ionicons
+            name="trending-up"
+            size={20}
+            color={
+              runningHours.startsWith(t("error", "Error"))
+                ? Colors.danger
+                : Colors.success
+            }
+          />
+          <Text style={styles.calcLabel}>
+            {t("running_hours", "Running Hours")}
+          </Text>
+          <Text
+            style={[
+              styles.calcValue,
+              {
+                color: runningHours.startsWith(t("error", "Error"))
+                  ? Colors.danger
+                  : Colors.success,
+              },
+            ]}
+          >
+            {runningHours}
+          </Text>
+        </View>
+      )}
     </FormSection>
   );
 
@@ -957,14 +1089,23 @@ export default function RefuelFormScreen() {
         </View>
       </View>
 
-      <View style={[styles.calcBox, styles.warningBox]}>
-        <Text style={styles.calcLabel}>
-          {t("fuel_consumed", "Fuel Consumed")}
+      {isAutoCalcPending(fuelConsumed) ? (
+        <Text style={styles.pendingHint}>
+          {t(
+            "fuel_consumed_pending",
+            "Fuel consumed will appear here once you enter Fuel Found above."
+          )}
         </Text>
-        <Text style={[styles.calcValue, { color: "#ea580c" }]}>
-          {fuelConsumed}
-        </Text>
-      </View>
+      ) : (
+        <View style={[styles.calcBox, styles.warningBox]}>
+          <Text style={styles.calcLabel}>
+            {t("fuel_consumed", "Fuel Consumed")}
+          </Text>
+          <Text style={[styles.calcValue, { color: "#ea580c" }]}>
+            {fuelConsumed}
+          </Text>
+        </View>
+      )}
 
       <InputField
         label={t("fuel_added", "Fuel Added")}
@@ -980,17 +1121,26 @@ export default function RefuelFormScreen() {
         <Text style={styles.errorText}>{errors.fuelAdded}</Text>
       )}
 
-      <View style={styles.totalBox}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Ionicons name="checkmark-circle" size={24} color="white" />
-          <View>
-            <Text style={styles.totalLabel}>
-              {t("current_total", "Current Total")}
-            </Text>
-            <Text style={styles.totalValue}>{currentTotal}</Text>
+      {isAutoCalcPending(currentTotal) ? (
+        <Text style={styles.pendingHint}>
+          {t(
+            "current_total_pending",
+            "Current total will appear here once Fuel Found or Fuel Added is entered."
+          )}
+        </Text>
+      ) : (
+        <View style={styles.totalBox}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Ionicons name="checkmark-circle" size={24} color="white" />
+            <View>
+              <Text style={styles.totalLabel}>
+                {t("current_total", "Current Total")}
+              </Text>
+              <Text style={styles.totalValue}>{currentTotal}</Text>
+            </View>
           </View>
         </View>
-      </View>
+      )}
     </FormSection>
   );
 
@@ -998,6 +1148,7 @@ export default function RefuelFormScreen() {
     <FormSection
       title={t("documentation_photos", "Documentation Photos")}
       icon="camera-outline"
+      statusChip={renderSectionChip(photos.length === 0 ? 1 : 0)}
     >
       <PhotoCapture
         label={t(
@@ -1120,8 +1271,35 @@ export default function RefuelFormScreen() {
     </FormSection>
   );
 
+  // Mirrors the required-field checks in handleSubmit (dip stick, tank
+  // dimensions, meter/fuel readings, documentation photos) so the technician
+  // can see what's left without having to tap Submit first and read a single
+  // blanket alert. Recomputed on every render — cheap, and avoids duplicating
+  // this list in a separate effect/state just to keep it in sync.
+  const missingRequiredFields: string[] = [];
+  if (!dipStickBefore) missingRequiredFields.push(t("dip_stick_before_short", "Dip Stick Before"));
+  if (!dipStickAfter) missingRequiredFields.push(t("dip_stick_after_short", "Dip Stick After"));
+  if (!tankLengthInput) missingRequiredFields.push(t("tank_length_short", "Tank Length"));
+  if (!tankHeightInput) missingRequiredFields.push(t("tank_height_short", "Tank Height"));
+  if (!tankWidthInput) missingRequiredFields.push(t("tank_width_short", "Tank Width"));
+  if (!currMeter) missingRequiredFields.push(t("current_meter_reading_short", "Meter Reading"));
+  if (!fuelFound) missingRequiredFields.push(t("fuel_found", "Fuel Found"));
+  if (!fuelAdded) missingRequiredFields.push(t("fuel_added", "Fuel Added"));
+  if (photos.length === 0) missingRequiredFields.push(t("documentation_photos", "Documentation Photos"));
+
   const renderFooter = () => (
     <View style={styles.footer}>
+      {missingRequiredFields.length > 0 && (
+        <Text style={styles.footerHint}>
+          {missingRequiredFields.length === 1
+            ? t("one_field_remaining", "1 required field remaining — {{field}}", { field: missingRequiredFields[0] })
+            : t("fields_remaining", "{{count}} required fields remaining — {{fields}}", {
+                count: missingRequiredFields.length,
+                fields: missingRequiredFields.join(", "),
+              })}
+        </Text>
+      )}
+      <View style={styles.footerButtonRow}>
       <TouchableOpacity
         style={styles.saveDraftBtn}
         onPress={handleSaveDraft}
@@ -1149,6 +1327,7 @@ export default function RefuelFormScreen() {
           </Text>
         )}
       </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -1354,6 +1533,37 @@ const styles = StyleSheet.create({
   successBox: { backgroundColor: "#f0fdf4", borderColor: "#bbf7d0" },
   errorBox: { backgroundColor: "#fef2f2", borderColor: "#fecaca" },
   warningBox: { backgroundColor: "#fff7ed", borderColor: "#fed7aa" },
+  pendingHint: {
+    fontSize: 12.5,
+    color: Colors.textSecondary,
+    fontStyle: "italic",
+    marginBottom: 16,
+  },
+  // Chips passed to FormSection's statusChip prop (see renderSectionChip) —
+  // same tint-pair convention as StatusBadge.tsx ('complete' green /
+  // 'in_progress' amber) so this reads consistently with the rest of the app.
+  sectionChipDone: {
+    backgroundColor: "#dcfce7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  sectionChipPending: {
+    backgroundColor: "#fff7ed",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  sectionChipTextDone: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: Colors.success,
+  },
+  sectionChipTextPending: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: Colors.warning,
+  },
   calcLabel: {
     fontSize: 14,
     color: Colors.text,
@@ -1416,8 +1626,17 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
+  },
+  footerButtonRow: {
     flexDirection: "row",
     gap: 12,
+  },
+  footerHint: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: Colors.warning,
+    marginBottom: 10,
+    textAlign: "center",
   },
   saveDraftBtn: {
     flex: 1,

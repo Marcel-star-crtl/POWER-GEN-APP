@@ -80,6 +80,13 @@ export default function CheckInSiteScreen() {
             isInside: locationStatus.isInside ?? null,
             distanceMeters: locationStatus.distanceMeters ?? null,
             wasAcknowledgedMismatch: !!(locationMismatch && acknowledgedMismatch),
+            // Raw GPS reading, so the server can independently recompute
+            // isInside/distanceMeters against the site's real coordinates
+            // at check-in time instead of just trusting this object's
+            // isInside/distanceMeters, which otherwise travel from an
+            // earlier, disconnected verify-location call.
+            latitude: locationStatus.latitude ?? null,
+            longitude: locationStatus.longitude ?? null,
           } : undefined,
         },
       );

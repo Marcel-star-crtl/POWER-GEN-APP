@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { Colors } from '../../constants/Colors';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { changeLanguage, SUPPORTED_LANGUAGES, SupportedLanguage } from '../../i18n';
+import { router } from 'expo-router';
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   en: 'English',
@@ -66,6 +67,18 @@ export default function Profile() {
             })}
           </View>
         </View>
+
+        {__DEV__ && (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.devDebugRow}
+              onPress={() => router.push('/(technician)/debug-sync-queue')}
+            >
+              <FontAwesome5 name="database" size={16} color={Colors.textSecondary || '#888'} />
+              <Text style={styles.devDebugText}>Dev: View local sync queue</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={styles.section}>
           <Button variant="danger" onPress={signOut} style={styles.logoutButton}>
@@ -139,6 +152,16 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     width: '100%',
+  },
+  devDebugRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+  },
+  devDebugText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
   },
   languageRow: {
     flexDirection: 'row',

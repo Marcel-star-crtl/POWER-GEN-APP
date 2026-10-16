@@ -20,7 +20,8 @@ import {
     PhotoCapture,
 } from "../../../components/ui/PhotoCapture";
 import { Colors } from "../../../constants/Colors";
-import { submitOrQueue } from "../../../services/offlineApi";
+import { generateClientId, submitOrQueue } from "../../../services/offlineApi";
+import { useAutoSaveDraft } from "../../../hooks/useAutoSaveDraft";
 
 // ─────────────────────────────────────────────
 // Types
@@ -210,9 +211,40 @@ export default function HSEInspectionForm() {
   );
 
   const draftKey = useMemo(() => `hse_inspection_draft_${siteId}`, [siteId]);
+  // Offline-sync idempotency guard — same pattern as tank-audit-form's
+  // getOrCreateStableClientId/pendingClientIdKey. A stable id generated once
+  // per pending submission and resent unchanged on every retry, so a flaky
+  // connection that actually got the request through doesn't end up
+  // creating two HSE inspection records when the client (wrongly) assumes
+  // it failed and tries again.
+  const pendingClientIdKey = useMemo(
+    () => `hse_inspection_pending_client_id_${siteId}`,
+    [siteId],
+  );
+  const getOrCreateStableClientId = useCallback(async (): Promise<string> => {
+    const existing = await AsyncStorage.getItem(pendingClientIdKey);
+    if (existing) return existing;
+    const fresh = generateClientId();
+    await AsyncStorage.setItem(pendingClientIdKey, fresh);
+    return fresh;
+  }, [pendingClientIdKey]);
+  const clearPendingClientId = useCallback(async () => {
+    await AsyncStorage.removeItem(pendingClientIdKey);
+  }, [pendingClientIdKey]);
 
   // ── Load draft ────────────────────────────────
   useEffect(() => {
+    // Reset immediately, before the async load even starts. Expo Router can
+    // reuse this component instance when navigating between different
+    // sites on this same dynamic route (a real, observed behavior — see the
+    // identical fix in tank-audit-form/[siteId].tsx and audit-form/[siteId].tsx)
+    // rather than remounting it. Without this reset, a technician who opens
+    // Site B's HSE inspection right after Site A's — before Site B has ever
+    // had a draft saved — would see, and could submit, Site A's checklist
+    // answers under Site B, since the branch below only calls setForm when
+    // a draft actually exists for the new site.
+    setLoading(true);
+    setForm(buildInitialForm(siteId || "", siteName || ""));
     const load = async () => {
       try {
         const draftStr = await AsyncStorage.getItem(draftKey);
@@ -263,20 +295,35 @@ export default function HSEInspectionForm() {
     };
   }, [form]);
 
+  // ── Local-only draft persist ──────────────────
+  // Just the on-device half of saveDraft below, with no network call and no
+  // Alert — shared by the manual "Save Draft" button (via saveDraft) and by
+  // the periodic autosave timer a few lines down. Writes the exact same
+  // draftKey shape loadSiteAndDraft's effect already reads on mount.
+  const saveLocalDraftOnly = useCallback(async () => {
+    await AsyncStorage.setItem(
+      draftKey,
+      JSON.stringify({
+        payload: form,
+        updatedAt: new Date().toISOString(),
+        siteId,
+      }),
+    );
+  }, [draftKey, form, siteId]);
+
+  // Periodic silent local autosave (every 2 min) — protects in-progress
+  // checklist answers even if the technician never taps "Save Draft"
+  // themselves. See hooks/useAutoSaveDraft.ts for the full rationale.
+  useAutoSaveDraft(saveLocalDraftOnly, { enabled: !loading });
+
   // ── Save draft ────────────────────────────────
   // NOTE: photos are sent RAW — submitOrQueue owns uploading them, whether
   // online or via the offline sync queue. No more pre-upload here.
   const saveDraft = useCallback(async () => {
     try {
-      const payload = { ...form, status: "draft" };
-      await AsyncStorage.setItem(
-        draftKey,
-        JSON.stringify({
-          payload: form,
-          updatedAt: new Date().toISOString(),
-          siteId,
-        }),
-      );
+      const stableClientId = await getOrCreateStableClientId();
+      const payload = { ...form, status: "draft", client_id: stableClientId };
+      await saveLocalDraftOnly();
 
       const result = await submitOrQueue(
         "hse_inspection_draft",
@@ -284,6 +331,13 @@ export default function HSEInspectionForm() {
         "POST",
         payload,
       );
+      // Only a definitive, acknowledged save (the request actually reached
+      // the server — not just queued for later) means this attempt is
+      // done; only then is it safe to start a fresh client_id for the next
+      // one. Otherwise keep this id so a retry — whether the user taps
+      // Save Draft again or the offline queue retries on its own — still
+      // matches the same pending attempt instead of becoming a new record.
+      if (!result.queued) await clearPendingClientId();
 
       Alert.alert(
         "Draft Saved",
@@ -294,7 +348,7 @@ export default function HSEInspectionForm() {
     } catch (e) {
       Alert.alert("Draft Saved", "Saved locally. Will sync when online.");
     }
-  }, [draftKey, form, siteId]);
+  }, [clearPendingClientId, form, getOrCreateStableClientId, saveLocalDraftOnly]);
 
   // ── Submit ────────────────────────────────────
   const submitForm = useCallback(async () => {
@@ -304,13 +358,15 @@ export default function HSEInspectionForm() {
     }
     setSubmitting(true);
     try {
-      const payload = { ...form, status: "submitted" };
+      const stableClientId = await getOrCreateStableClientId();
+      const payload = { ...form, status: "submitted", client_id: stableClientId };
       const result = await submitOrQueue(
         "hse_inspection_submit",
         "/technician/hse-inspection",
         "POST",
         payload,
       );
+      if (!result.queued) await clearPendingClientId();
       await AsyncStorage.removeItem(draftKey);
 
       Alert.alert(
@@ -332,7 +388,7 @@ export default function HSEInspectionForm() {
     } finally {
       setSubmitting(false);
     }
-  }, [draftKey, form, router, saveDraft]);
+  }, [clearPendingClientId, draftKey, form, getOrCreateStableClientId, router, saveDraft]);
 
   if (loading) {
     return (

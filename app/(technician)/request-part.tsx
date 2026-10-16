@@ -14,6 +14,7 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { PhotoAttachment, PhotoCapture } from '../../components/ui/PhotoCapture';
 import { submitOrQueue } from '../../services/offlineApi';
 
 export default function RequestPartScreen() {
@@ -26,6 +27,15 @@ export default function RequestPartScreen() {
   const [quantity, setQuantity] = useState('1');
   const [requestedTime, setRequestedTime] = useState('');
   const [description, setDescription] = useState('');
+  const [photos, setPhotos] = useState<PhotoAttachment[]>([]);
+
+  const handleAddPhoto = (photo: PhotoAttachment) => {
+    setPhotos((prev) => [...prev, photo]);
+  };
+
+  const handleRemovePhoto = (uri: string) => {
+    setPhotos((prev) => prev.filter((p) => p.uri !== uri));
+  };
 
   const handleSubmit = async () => {
     if (!partId) {
@@ -50,6 +60,16 @@ export default function RequestPartScreen() {
 
       if (requestedTime) {
         payload.requested_time = requestedTime;
+      }
+
+      if (photos.length > 0) {
+        // PartRequest.photos is declared as [String] (uploaded URLs), not objects.
+        // Pass bare local URIs here — processAndUploadData collapses each
+        // `file://`/`content://` string to its uploaded remote URL string in
+        // place, matching the schema. (Passing {uri,name,type} objects instead
+        // would survive the upload step as objects, not strings, and mismatch
+        // the schema.)
+        payload.photos = photos.map((p) => p.uri);
       }
 
       const result = await submitOrQueue('part_request', '/parts/requests', 'POST', payload);
@@ -140,9 +160,17 @@ export default function RequestPartScreen() {
                 placeholder="Explain why this part is needed..."
             />
           </View>
+
+          <PhotoCapture
+            label="Photos (optional)"
+            photos={photos}
+            onAddPhoto={handleAddPhoto}
+            onRemovePhoto={handleRemovePhoto}
+            maxPhotos={3}
+          />
         </Card>
 
-        <Button 
+        <Button
             onPress={handleSubmit} 
             disabled={loading}
             loading={loading}

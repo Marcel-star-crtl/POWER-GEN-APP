@@ -90,12 +90,14 @@ export default function HistoryScreen() {
   const [isOffline,   setIsOffline]   = useState(false);
   const [search,      setSearch]      = useState('');
   const [tab,         setTab]         = useState<'all'|'maintenance'|'fuel'>('all');
+  const [loadError,   setLoadError]   = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
+      setLoadError(null);
       const [mRes, fRes] = await Promise.allSettled([
         cachedGet('/technician/maintenance/tasks?status=completed,approved&limit=500'),
-        cachedGet('/technician/refuel/history?limit=500'),
+        cachedGet('/technician/fuel-consumption-records?limit=500'),
       ]);
 
       if (mRes.status === 'fulfilled') {
@@ -134,6 +136,20 @@ export default function HistoryScreen() {
           fuel_purchase_id: r.fuel_purchase?._id || r.fuel_purchase,
           status:           r.status || 'completed',
         })));
+      }
+
+      if (mRes.status === 'rejected' || fRes.status === 'rejected') {
+        console.error('[History] partial load failure:', {
+          maintenance: mRes.status === 'rejected' ? mRes.reason : null,
+          fuel:        fRes.status === 'rejected' ? fRes.reason : null,
+        });
+        setLoadError(
+          mRes.status === 'rejected' && fRes.status === 'rejected'
+            ? 'Couldn’t load your history. Pull down to try again.'
+            : mRes.status === 'rejected'
+              ? 'Couldn’t load maintenance history — showing fuel records only.'
+              : 'Couldn’t load fuel history — showing maintenance records only.'
+        );
       }
     } catch (e) { console.error('[History] load error:', e); }
     finally { setLoading(false); setRefreshing(false); }
@@ -193,6 +209,12 @@ export default function HistoryScreen() {
           </View>
         )}
       </View>
+
+      {loadError && (
+        <View style={{ backgroundColor: '#FEF3C7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, marginBottom: 10 }}>
+          <Text style={{ fontSize: 12, color: '#92400E' }}>{loadError}</Text>
+        </View>
+      )}
 
       {/* Summary strip */}
       <View style={styles.statsStrip}>

@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons }      from '@expo/vector-icons';
 import { FontAwesome5 }  from '@expo/vector-icons';
 import AsyncStorage      from '@react-native-async-storage/async-storage';
-import { router }        from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshControl, ScrollView, StyleSheet, Text,
@@ -22,8 +22,10 @@ import { Colors }        from '../../constants/Colors';
 import { useAuth }       from '../../context/AuthContext';
 import { api }           from '../../services/api';
 import { cachedGet }     from '../../services/offlineApi';
+import { processQueue }  from '../../services/syncManager';
 import { useSyncCompletion } from '../../hooks/useSyncCompletion';
 import { isFuelRole, isRestrictedAcScopeRole } from '../../utils/roles';
+import { countPendingShares } from '../../lib/whatsappShareQueue';
 
 interface DashboardStats {
   pendingTasks:           number; // awaiting supervisor approval
@@ -63,6 +65,15 @@ export default function TechnicianDashboard() {
   // counts above, since those come from a different source (maintenance
   // visits) and mixing an unrelated metric in would misrepresent both.
   const [tankAuditDraftCount, setTankAuditDraftCount] = useState(0);
+  // Unsent WhatsApp reports (see lib/whatsappShareQueue.ts) — purely
+  // local to this device, so refreshed on focus rather than as part of
+  // fetchDashboard's server calls below.
+  const [pendingShareCount, setPendingShareCount] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      countPendingShares().then(setPendingShareCount).catch(() => {});
+    }, []),
+  );
 
   // ── Offline visit sync ────────────────────────────────────────────────────
   const syncOfflineVisits = async () => {
@@ -228,6 +239,22 @@ export default function TechnicianDashboard() {
           </TouchableOpacity>
         )}
 
+        {/* ── Unsent WhatsApp reports — technician tapped "Share Later" ── */}
+        {pendingShareCount > 0 && (
+          <TouchableOpacity
+            style={styles.whatsappBanner}
+            onPress={() => router.push('/(technician)/pending-whatsapp-shares')}
+          >
+            <Ionicons name="logo-whatsapp" size={20} color="#166534" />
+            <Text style={styles.whatsappBannerText}>
+              {pendingShareCount === 1
+                ? t('whatsapp_share_pending_singular', '1 WhatsApp report not yet shared — tap to send it')
+                : t('whatsapp_share_pending_plural', '{{count}} WhatsApp reports not yet shared — tap to send them', { count: pendingShareCount })}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color="#166534" />
+          </TouchableOpacity>
+        )}
+
         {/* ── Fuel request stats (if not AC-only) ── */}
         {!isAcTech && (stats?.fuelRequestsScheduled || 0) + (stats?.fuelRequestsPending || 0) > 0 && (
           <View style={styles.fuelStatsRow}>
@@ -252,7 +279,21 @@ export default function TechnicianDashboard() {
           <QuickActionCard
             title="sync_now" subtitle="upload_offline_visits" badgeText="manual_sync"
             icon="cloud-upload" color={Colors.success}
-            onPress={async () => { await syncOfflineVisits(); await fetchDashboard(); }}
+            onPress={async () => {
+              // Two genuinely separate offline mechanisms exist in this
+              // app: the legacy AsyncStorage-based one below (site
+              // visits only), and the SQLite-backed sync_queue used by
+              // everything built since (tank audits, refueling, parts
+              // requests, etc — see services/syncManager.ts). This
+              // button used to only drain the first, which meant a
+              // technician pressing "Sync Now" to force a stuck tank
+              // audit draft through would see the button do something,
+              // report success, and the audit would still not be on the
+              // server — the button was real, it just wasn't wired to
+              // the thing they needed it for. Now drains both.
+              await Promise.all([syncOfflineVisits(), processQueue()]);
+              await fetchDashboard();
+            }}
           />
           {!isFuelTech && (
             <QuickActionCard
@@ -340,6 +381,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 14, marginBottom: 20,
   },
   draftBannerText: { flex: 1, color: '#92400E', fontSize: 13, fontWeight: '600' },
+  whatsappBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F0FDF4', borderRadius: 10, borderWidth: 1, borderColor: '#BBF7D0',
+    paddingVertical: 12, paddingHorizontal: 14, marginBottom: 20,
+  },
+  whatsappBannerText: { flex: 1, color: '#166534', fontSize: 13, fontWeight: '600' },
   fuelStatsRow:  { flexDirection: 'row', gap: 10, marginBottom: 20 },
   fuelStatCard:  { flex: 1, backgroundColor: Colors.surface, borderRadius: 10, padding: 12, alignItems: 'center', borderWidth: 1.5, elevation: 1 },
   fuelStatNum:   { fontSize: 28, fontWeight: '900', lineHeight: 32 },

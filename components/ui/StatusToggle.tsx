@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-nativ
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next'; // ✅ proper import
 import { Colors } from '../../constants/Colors';
+import { PhotoAttachment, PhotoCapture } from './PhotoCapture';
 
 type WarningLevel = 'critical' | 'warning' | 'info' | 'none';
 
@@ -16,6 +17,13 @@ interface StatusToggleProps {
   onCommentChange?: (text: string) => void;
   okLabel?: string;
   nokLabel?: string;
+  /** Optional photo(s) attached to this item's issue — e.g. a close-up of the
+   *  fault. Purely additive: omit onAddPhoto and no photo UI renders, so every
+   *  existing call site keeps behaving exactly as before. */
+  photos?: PhotoAttachment[];
+  onAddPhoto?: (photo: PhotoAttachment) => void;
+  onRemovePhoto?: (uri: string) => void;
+  maxPhotos?: number;
 }
 
 export const StatusToggle: React.FC<StatusToggleProps> = ({
@@ -28,6 +36,10 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
   onCommentChange,
   okLabel = 'OK / Yes',
   nokLabel = 'NOK / No',
+  photos,
+  onAddPhoto,
+  onRemovePhoto,
+  maxPhotos = 3,
 }) => {
   const { t } = useTranslation(); // ✅ hook at the top of the component, reads from I18nextProvider
 
@@ -64,7 +76,26 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
     }
   };
 
+  // getWarningConfig() returns null for warningLevel 'none'/unset. Previously
+  // that meant the comment box below never rendered at all for a call site
+  // that passed comment/onCommentChange but no warningLevel — so selecting
+  // "NOK" silently did nothing. We still want that visual styling (colored
+  // box) to depend on warningLevel, but the comment/photo controls themselves
+  // should appear on any NOK selection where the parent actually wants them,
+  // via a neutral fallback "issue noted" style.
   const warning = getWarningConfig();
+  const hasIssueInputs = Boolean(onCommentChange || onAddPhoto);
+  const issuePanel =
+    warning ||
+    (hasIssueInputs
+      ? {
+          icon: 'chatbox-ellipses-outline' as const,
+          color: Colors.textSecondary,
+          bg: Colors.lightGray,
+          title: 'ISSUE NOTED',
+          message: 'Add any details below (optional)',
+        }
+      : null);
 
   return (
     <View style={styles.container}>
@@ -97,14 +128,14 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
         </TouchableOpacity>
       </View>
 
-      {isNOK && warning && (
-        <View style={[styles.warningContainer, { backgroundColor: warning.bg, borderLeftColor: warning.color }]}>
+      {isNOK && issuePanel && (
+        <View style={[styles.warningContainer, { backgroundColor: issuePanel.bg, borderLeftColor: issuePanel.color }]}>
           <View style={styles.warningHeader}>
-            <Ionicons name={warning.icon} size={20} color={warning.color} />
-            <Text style={[styles.warningTitle, { color: warning.color }]}>{t(warning.title, warning.title)}</Text>
+            <Ionicons name={issuePanel.icon} size={20} color={issuePanel.color} />
+            <Text style={[styles.warningTitle, { color: issuePanel.color }]}>{t(issuePanel.title, issuePanel.title)}</Text>
           </View>
-          <Text style={styles.warningMessage}>{t(warning.message, warning.message)}</Text>
-          
+          <Text style={styles.warningMessage}>{t(issuePanel.message, issuePanel.message)}</Text>
+
           {onCommentChange && (
             <View style={styles.commentContainer}>
               <Text style={styles.commentLabel}>{t('statusToggle.commentsLabel', 'Comments / Observations (optional)')}</Text>
@@ -118,6 +149,18 @@ export const StatusToggle: React.FC<StatusToggleProps> = ({
                 textAlignVertical="top"
               />
               <Text style={styles.charCount}>{comment?.length || 0}/500</Text>
+            </View>
+          )}
+
+          {onAddPhoto && onRemovePhoto && (
+            <View style={styles.commentContainer}>
+              <PhotoCapture
+                label={t('statusToggle.issuePhotoLabel', 'Photo (optional)')}
+                photos={photos || []}
+                onAddPhoto={onAddPhoto}
+                onRemovePhoto={onRemovePhoto}
+                maxPhotos={maxPhotos}
+              />
             </View>
           )}
         </View>

@@ -355,6 +355,16 @@ const GeneratorForm = ({
           comment={data.coolantStatusComment}
           onCommentChange={(v) => update("coolantStatusComment", v)}
         />
+
+        {/* Optional — a technician can attach a general photo of this
+            section (e.g. the engine bay) without it blocking submission. */}
+        <PhotoCapture
+          label={t("equipment_status_photos", "Equipment Status Photos (optional)")}
+          photos={getPhotos("SECTION_EQSTATUS")}
+          onAddPhoto={(p) => addPhoto(p, "SECTION_EQSTATUS")}
+          onRemovePhoto={removePhoto}
+          maxPhotos={5}
+        />
       </FormSection>
 
       <FormSection
@@ -417,6 +427,15 @@ const GeneratorForm = ({
           onChange={(v) => update("alarmsStatusChecked", v)}
           comment={data.alarmsStatusCheckedComment}
           onCommentChange={(v) => update("alarmsStatusCheckedComment", v)}
+        />
+
+        {/* Optional section photo — same pattern as Equipment Status above. */}
+        <PhotoCapture
+          label={t("additional_checks_photos", "Additional Checks Photos (optional)")}
+          photos={getPhotos("SECTION_ADDCHECKS")}
+          onAddPhoto={(p) => addPhoto(p, "SECTION_ADDCHECKS")}
+          onRemovePhoto={removePhoto}
+          maxPhotos={5}
         />
       </FormSection>
 
@@ -595,10 +614,15 @@ const PowerCabinetFormWithHydration = ({
   const [batteries, setBatteries] = useState<any[]>(
     Array(3).fill({ brand: "", autonomy: "", capacity: "" }),
   );
-  const [cooling, setCooling] = useState<any>({ status: null, comments: "" });
+  const [cooling, setCooling] = useState<any>({
+    status: null,
+    comments: "",
+    photos: [] as PhotoAttachment[],
+  });
   const [controller, setController] = useState<any>({
     status: null,
     comments: "",
+    photos: [] as PhotoAttachment[],
   });
   const [rectifierSummary, setRectifierSummary] = useState({
     modulesFound: "",
@@ -612,6 +636,7 @@ const PowerCabinetFormWithHydration = ({
     outputChecked: null,
     autonomyTestDone: null,
     autonomyEstimated: "",
+    photos: [] as PhotoAttachment[],
   });
 
   useEffect(() => {
@@ -657,8 +682,8 @@ const PowerCabinetFormWithHydration = ({
           }))
         : [],
     );
-    setCooling(v.cooling ?? { status: null, comments: "" });
-    setController(v.controller ?? { status: null, comments: "" });
+    setCooling({ status: null, comments: "", photos: [], ...(v.cooling || {}) });
+    setController({ status: null, comments: "", photos: [], ...(v.controller || {}) });
     setRectifierSummary(
       v.rectifierSummary ?? {
         modulesFound: v.modulesFound ?? "",
@@ -669,13 +694,13 @@ const PowerCabinetFormWithHydration = ({
         cablingStatusGood: v.cablingStatusGood ?? null,
       },
     );
-    setBatterySummary(
-      v.batterySummary ?? {
-        outputChecked: v.outputChecked ?? null,
-        autonomyTestDone: v.autonomyTestDone ?? null,
-        autonomyEstimated: v.autonomyEstimated ?? "",
-      },
-    );
+    setBatterySummary({
+      outputChecked: v.outputChecked ?? null,
+      autonomyTestDone: v.autonomyTestDone ?? null,
+      autonomyEstimated: v.autonomyEstimated ?? "",
+      photos: [],
+      ...(v.batterySummary || {}),
+    });
   }, [hydrateKey]);
 
   useEffect(() => {
@@ -1035,6 +1060,25 @@ const PowerCabinetFormWithHydration = ({
                 unit={t("hours_short", "hrs")}
                 keyboardType="numeric"
               />
+              <PhotoCapture
+                label={t("battery_section_photos", "Battery Section Photos (optional)")}
+                photos={batterySummary.photos || []}
+                onAddPhoto={(p) =>
+                  setBatterySummary({
+                    ...batterySummary,
+                    photos: [...(batterySummary.photos || []), p],
+                  })
+                }
+                onRemovePhoto={(uri) =>
+                  setBatterySummary({
+                    ...batterySummary,
+                    photos: (batterySummary.photos || []).filter(
+                      (p: PhotoAttachment) => p.uri !== uri,
+                    ),
+                  })
+                }
+                maxPhotos={5}
+              />
             </FormSection>
 
             {batteries.map((batt, index) => (
@@ -1090,6 +1134,20 @@ const PowerCabinetFormWithHydration = ({
               comment={cooling.comments}
               onCommentChange={(v) => setCooling({ ...cooling, comments: v })}
             />
+            <PhotoCapture
+              label={t("cooling_system_photos", "Cooling System Photos (optional)")}
+              photos={cooling.photos || []}
+              onAddPhoto={(p) =>
+                setCooling({ ...cooling, photos: [...(cooling.photos || []), p] })
+              }
+              onRemovePhoto={(uri) =>
+                setCooling({
+                  ...cooling,
+                  photos: (cooling.photos || []).filter((p: PhotoAttachment) => p.uri !== uri),
+                })
+              }
+              maxPhotos={5}
+            />
           </FormSection>
         )}
 
@@ -1108,6 +1166,23 @@ const PowerCabinetFormWithHydration = ({
               onCommentChange={(v) =>
                 setController({ ...controller, comments: v })
               }
+            />
+            <PhotoCapture
+              label={t("controller_photos", "Controller Photos (optional)")}
+              photos={controller.photos || []}
+              onAddPhoto={(p) =>
+                setController({
+                  ...controller,
+                  photos: [...(controller.photos || []), p],
+                })
+              }
+              onRemovePhoto={(uri) =>
+                setController({
+                  ...controller,
+                  photos: (controller.photos || []).filter((p: PhotoAttachment) => p.uri !== uri),
+                })
+              }
+              maxPhotos={5}
             />
           </FormSection>
         )}
@@ -1263,12 +1338,27 @@ const FuelTankForm = ({
     isWaterproof: null,
     isWaterproofComment: "",
     comments: "",
+    photos: [] as PhotoAttachment[],
   });
 
   useEffect(() => {
     if (!hydrateKey) return;
     if (!value || typeof value !== "object") return;
     const v: any = value;
+    const photos: PhotoAttachment[] = (Array.isArray(v.photos) ? v.photos : [])
+      .map((p: any) => {
+        if (!p) return null;
+        if (typeof p === "string")
+          return {
+            uri: p,
+            name: p.split("/").pop() || "photo.jpg",
+            type: "image/jpeg",
+          };
+        if (typeof p === "object" && typeof p.uri === "string")
+          return p as PhotoAttachment;
+        return null;
+      })
+      .filter(Boolean) as PhotoAttachment[];
     setData({
       tankStatus: v.tankStatus ?? null,
       separatingFilter: v.separatingFilter ?? null,
@@ -1283,6 +1373,7 @@ const FuelTankForm = ({
       isWaterproofComment:
         v.isWaterproofComment ?? v.is_waterproof_comment ?? "",
       comments: v.comments ?? "",
+      photos,
     });
   }, [hydrateKey]);
 
@@ -1290,6 +1381,16 @@ const FuelTankForm = ({
     const newData = { ...data, [key]: value };
     setData(newData);
     onUpdate(newData);
+  };
+
+  const addPhoto = (p: PhotoAttachment) => {
+    update("photos", [...(data.photos || []), p]);
+  };
+  const removePhoto = (uri: string) => {
+    update(
+      "photos",
+      (data.photos || []).filter((p) => p.uri !== uri),
+    );
   };
 
   return (
@@ -1340,6 +1441,13 @@ const FuelTankForm = ({
         onChangeText={(v) => update("comments", v)}
         multiline
       />
+      <PhotoCapture
+        label={t("tank_inspection_photos", "Tank Inspection Photos (optional)")}
+        photos={data.photos}
+        onAddPhoto={addPhoto}
+        onRemovePhoto={removePhoto}
+        maxPhotos={5}
+      />
     </FormSection>
   );
 };
@@ -1381,12 +1489,27 @@ const ShelterForm = ({
     condenserEvaporatorCleanedComment: "",
     outdoorFanChecked: null,
     outdoorFanCheckedComment: "",
+    photos: [] as PhotoAttachment[],
   });
 
   useEffect(() => {
     if (!hydrateKey) return;
     if (!value || typeof value !== "object") return;
     const v: any = value;
+    const incomingPhotos: any[] = Array.isArray(v.photos) ? v.photos : [];
+    const photos: PhotoAttachment[] = incomingPhotos
+      .map((p: any) => {
+        if (!p) return null;
+        if (typeof p === "string") {
+          const uri = p;
+          const name = uri.split("/").pop() || "photo.jpg";
+          return { uri, name, type: "image/jpeg" } as PhotoAttachment;
+        }
+        if (typeof p === "object" && typeof p.uri === "string")
+          return p as PhotoAttachment;
+        return null;
+      })
+      .filter(Boolean) as PhotoAttachment[];
     setData({
       shelterStatus: v.shelterStatus ?? null,
       doorStatus: v.doorStatus ?? null,
@@ -1441,6 +1564,7 @@ const ShelterForm = ({
       outdoorFanChecked: v.outdoorFanChecked ?? v.outdoor_fan_checked ?? null,
       outdoorFanCheckedComment:
         v.outdoorFanCheckedComment ?? v.outdoor_fan_checked_comment ?? "",
+      photos,
     });
   }, [hydrateKey]);
 
@@ -1449,6 +1573,22 @@ const ShelterForm = ({
     setData(newData);
     onUpdate(newData);
   };
+
+  // Optional per-section photos — same tag/filter convention as GeneratorForm
+  // above, reusing the one flat `photos` array so no new top-level field is
+  // introduced (and nothing else that reads `data.photos` needs to change).
+  const getPhotos = (tag: string) =>
+    data.photos.filter((p) => p.name?.startsWith(tag));
+  const addPhoto = (p: PhotoAttachment, tag: string) =>
+    update("photos", [
+      ...data.photos,
+      { ...p, name: `${tag}_${p.name || "photo"}` },
+    ]);
+  const removePhoto = (uri: string) =>
+    update(
+      "photos",
+      data.photos.filter((p) => p.uri !== uri),
+    );
 
   return (
     <>
@@ -1470,6 +1610,13 @@ const ShelterForm = ({
           comment={data.doorStatusComment}
           onCommentChange={(v) => update("doorStatusComment", v)}
         />
+        <PhotoCapture
+          label={t("shelter_condition_photos", "Shelter Condition Photos (optional)")}
+          photos={getPhotos("SECTION_SHELTER")}
+          onAddPhoto={(p) => addPhoto(p, "SECTION_SHELTER")}
+          onRemovePhoto={removePhoto}
+          maxPhotos={5}
+        />
       </FormSection>
       <FormSection
         title={t("air_conditioners", "Air Conditioners")}
@@ -1488,6 +1635,13 @@ const ShelterForm = ({
           onChange={(v) => update("ac2Status", v)}
           comment={data.ac2Comments}
           onCommentChange={(v) => update("ac2Comments", v)}
+        />
+        <PhotoCapture
+          label={t("ac_photos", "Air Conditioner Photos (optional)")}
+          photos={getPhotos("SECTION_AC")}
+          onAddPhoto={(p) => addPhoto(p, "SECTION_AC")}
+          onRemovePhoto={removePhoto}
+          maxPhotos={5}
         />
       </FormSection>
       <FormSection title={t("environment", "Environment")} icon="thermometer">
@@ -1566,6 +1720,13 @@ const ShelterForm = ({
           onChange={(v) => update("outdoorFanChecked", v)}
           comment={data.outdoorFanCheckedComment}
           onCommentChange={(v) => update("outdoorFanCheckedComment", v)}
+        />
+        <PhotoCapture
+          label={t("ac_maintenance_photos", "AC Maintenance Photos (optional)")}
+          photos={getPhotos("SECTION_ACMAINT")}
+          onAddPhoto={(p) => addPhoto(p, "SECTION_ACMAINT")}
+          onRemovePhoto={removePhoto}
+          maxPhotos={5}
         />
       </FormSection>
     </>
@@ -1667,8 +1828,18 @@ const CleaningForm = ({
     onUpdate(newData);
   };
 
-  const addPhoto = (p: PhotoAttachment) => {
-    const newData = { ...data, photos: [...(data.photos || []), p] };
+  // `tag` is optional so the existing "Site Photos" call below (which passes
+  // every photo, untagged) keeps behaving exactly as before. Passing a tag
+  // prefixes the photo's name so getPhotos(tag) can show just that
+  // section's optional photos without a second, parallel array.
+  const addPhoto = (p: PhotoAttachment, tag?: string) => {
+    const newData = {
+      ...data,
+      photos: [
+        ...(data.photos || []),
+        tag ? { ...p, name: `${tag}_${p.name || "photo"}` } : p,
+      ],
+    };
     setData(newData);
     onUpdate(newData);
   };
@@ -1680,6 +1851,8 @@ const CleaningForm = ({
     setData(newData);
     onUpdate(newData);
   };
+  const getPhotos = (tag: string) =>
+    (data.photos || []).filter((p) => p.name?.startsWith(tag));
 
   return (
     <>
@@ -1742,6 +1915,13 @@ const CleaningForm = ({
           comment={data.airBlowerUsedComment}
           onCommentChange={(v) => update("airBlowerUsedComment", v)}
         />
+        <PhotoCapture
+          label={t("site_cleanliness_photos", "Site Cleanliness Photos (optional)")}
+          photos={getPhotos("SECTION_CLEAN")}
+          onAddPhoto={(p) => addPhoto(p, "SECTION_CLEAN")}
+          onRemovePhoto={removePhoto}
+          maxPhotos={5}
+        />
       </FormSection>
       <FormSection
         title={t("security_status", "Security Status")}
@@ -1771,6 +1951,13 @@ const CleaningForm = ({
           nokLabel={t("no", "No")}
           comment={data.securityBoxComment}
           onCommentChange={(v) => update("securityBoxComment", v)}
+        />
+        <PhotoCapture
+          label={t("security_status_photos", "Security Status Photos (optional)")}
+          photos={getPhotos("SECTION_SECURITY")}
+          onAddPhoto={(p) => addPhoto(p, "SECTION_SECURITY")}
+          onRemovePhoto={removePhoto}
+          maxPhotos={5}
         />
       </FormSection>
       <FormSection

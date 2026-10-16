@@ -11,6 +11,16 @@ import { drawDownLocalPurchase } from "../../../lib/localPurchases";
 import { submitOrQueue, generateClientId } from "../../../services/offlineApi";
 import { Colors } from "../../../constants/Colors";
 import { FontAwesome5 } from "@expo/vector-icons";
+import { useAuth } from "../../../context/AuthContext";
+import {
+  WhatsAppSharePopup,
+  WhatsAppSharePhoto,
+} from "../../../components/ui/WhatsAppSharePopup";
+import {
+  buildRefuelWhatsAppMessage,
+  toDDMMYYYY,
+} from "../../../utils/formatRefuelWhatsAppMessage";
+import { addPendingShare } from "../../../lib/whatsappShareQueue";
 
 export default function RefuelSummaryScreen() {
   const router = useRouter();
@@ -23,9 +33,17 @@ export default function RefuelSummaryScreen() {
     formPayload: string;
   }>();
 
+  const { user } = useAuth();
+
   const [workflow, setWorkflow]   = useState<any>(null);
   const [loading, setLoading]     = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // ── WhatsApp share popup — shown right after a successful submit ─────────
+  const [sharePopupVisible, setSharePopupVisible] = useState(false);
+  const [shareMessage, setShareMessage] = useState("");
+  const [sharePhotos, setSharePhotos] = useState<WhatsAppSharePhoto[]>([]);
+  const [shareQueuedOffline, setShareQueuedOffline] = useState(false);
 
   useEffect(() => {
     if (!params.siteId) { setLoading(false); return; }
@@ -110,18 +128,89 @@ export default function RefuelSummaryScreen() {
         }
       }
 
-      Alert.alert(
-        "Success",
-        result.queued
-          ? "No connection — refueling saved and will sync automatically."
-          : "Refueling submitted successfully!",
-        [{ text: "OK", onPress: () => router.replace("/(technician)/refueling") }],
-      );
+      // ── Build the WhatsApp share report and show the popup instead of a
+      // plain success alert — see components/ui/WhatsAppSharePopup.tsx and
+      // utils/formatRefuelWhatsAppMessage.ts. `payload` here still has its
+      // local file:// photo URIs (submitOrQueue only uploads copies, it
+      // doesn't delete the originals), so they're safe to share from.
+      //
+      // Only measurement photos go into the shared report — documentation
+      // photos (receipts/paperwork) and guard photos are internal records,
+      // not something a technician wants landing in a WhatsApp group.
+      const allPhotos: WhatsAppSharePhoto[] = [
+        ...(payload.measurement_photos || []).map((p: any, i: number) => ({
+          uri: p.uri,
+          label: `Measurement Photo ${i + 1}`,
+        })),
+      ];
+
+      const startDate = toDDMMYYYY(payload.visit_date);
+      const message = buildRefuelWhatsAppMessage({
+        site_id: params.siteId,
+        site_name: params.siteName,
+        // Prefer the value already stamped into the submitted payload
+        // (payload.fse_name — see refueling/form.tsx) so the shared text
+        // always matches what was actually saved server-side; only fall
+        // back to the live session's name if an older queued payload
+        // (created before that field existed) doesn't have it.
+        fse_name: payload.fse_name || user?.fullName || "-",
+        tank_type: payload.tank_type,
+        tank_length_cm: payload.tank_length_cm,
+        tank_height_cm: payload.tank_height_cm,
+        tank_width_cm: payload.tank_width_cm,
+        tank_observations: payload.tank_observations,
+        fuel_sensor_status: payload.fuel_sensor_status,
+        dip_stick_before_cm: payload.dip_stick_before_cm,
+        dip_stick_after_cm: payload.dip_stick_after_cm,
+        truck_flow_meter_before_l: payload.truck_flow_meter_before_l,
+        truck_flow_meter_after_l: payload.truck_flow_meter_after_l,
+        truck_plate_number: payload.truck_plate_number,
+        guard_name: payload.guard_name,
+        guard_number: payload.guard_number,
+        gen_running_hour: payload.closing_hours,
+        photo_count: allPhotos.length,
+        refuel_start_date: startDate,
+        refuel_start_time: payload.refuel_start_time,
+        refuel_end_date: startDate,
+        refuel_end_time: payload.refuel_end_time,
+        // Reuses the technician-entered visit date — this app doesn't
+        // separately track an originally-scheduled date at the point this
+        // form is reached. See utils/formatRefuelWhatsAppMessage.ts.
+        date_planned: startDate,
+      });
+
+      setShareMessage(message);
+      setSharePhotos(allPhotos);
+      setShareQueuedOffline(!!result.queued);
+      setSharePopupVisible(true);
     } catch (err: any) {
       Alert.alert("Error", err?.response?.data?.error || err?.message || "Submission failed.");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Called once the WhatsApp share popup is dismissed, however that
+  // happens (X, backdrop, "Share Later", or "Done — I've Shared This").
+  // `shared: false` (the default for every path except the explicit
+  // "Done" button) queues the report so it can be re-sent later from
+  // app/(technician)/pending-whatsapp-shares.tsx — nothing is silently
+  // lost just because the technician couldn't share right now.
+  const handleShareFinish = async ({ shared }: { shared: boolean }) => {
+    if (!shared) {
+      try {
+        await addPendingShare({
+          site_id: params.siteId,
+          site_name: params.siteName,
+          message: shareMessage,
+          photos: sharePhotos,
+        });
+      } catch (e) {
+        console.warn("[RefuelSummary] Failed to queue WhatsApp share for later:", e);
+      }
+    }
+    setSharePopupVisible(false);
+    router.replace("/(technician)/refueling");
   };
 
   if (loading) {
@@ -134,6 +223,7 @@ export default function RefuelSummaryScreen() {
   }
 
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container}>
       {/* Header */}
       <View style={styles.header}>
@@ -212,6 +302,15 @@ export default function RefuelSummaryScreen() {
         </TouchableOpacity>
       </View>
     </ScrollView>
+    <WhatsAppSharePopup
+      visible={sharePopupVisible}
+      siteName={params.siteName}
+      message={shareMessage}
+      photos={sharePhotos}
+      queuedOffline={shareQueuedOffline}
+      onFinish={handleShareFinish}
+    />
+    </>
   );
 }
 

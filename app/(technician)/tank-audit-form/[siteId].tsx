@@ -19,6 +19,7 @@ import { PhotoAttachment, PhotoCapture } from "../../../components/ui/PhotoCaptu
 import { Colors } from "../../../constants/Colors";
 import { api, siteAPI } from "../../../services/api";
 import { submitOrQueue, generateClientId } from "../../../services/offlineApi";
+import { useAutoSaveDraft } from "../../../hooks/useAutoSaveDraft";
 import { buildInitialTankAuditForm, emptyCheckItem, TANK_AUDIT_CHECK_AREAS } from "../../../types/tank-audit.types";
 import type { CheckItem, CheckStatus, Severity, TankAuditForm } from "../../../types/tank-audit.types";
 
@@ -150,6 +151,12 @@ export default function TankAuditFormScreen() {
   const [logFiles, setLogFiles] = useState<Record<string, PhotoAttachment[]>>({});
 
   const draftKey = useMemo(() => `tank_audit_draft_${siteId}`, [siteId]);
+  // Separate from draftKey — this needs to exist and stay stable BEFORE
+  // the first successful save (which is when auditId first becomes
+  // known), and survive across retries, offline queueing, and app
+  // restarts, so every create-attempt for this draft session reuses the
+  // same idempotency key instead of minting a new one each time.
+  const pendingClientIdKey = useMemo(() => `tank_audit_pending_client_id_${siteId}`, [siteId]);
 
   const checkLabels: Record<string, string> = useMemo(
     () => ({
@@ -255,6 +262,26 @@ export default function TankAuditFormScreen() {
   // because the local auditId was lost (app data cleared, a different
   // device, or the original local write itself failed) while a real
   // record still exists on the server.
+  // The actual fix for repeated saves creating duplicate records: every
+  // create-attempt (an offline retry, a race from a double-tap, a
+  // resolveExistingAuditId lookup that transiently found nothing) must
+  // send the SAME client_id, or the backend's own findOne({ client_id })
+  // idempotency check can never match anything and every attempt
+  // becomes its own new record — which is exactly what was happening
+  // before this existed, since generateClientId() was called fresh on
+  // every attempt with no auditId yet.
+  const getOrCreateStableClientId = useCallback(async (): Promise<string> => {
+    const existing = await AsyncStorage.getItem(pendingClientIdKey);
+    if (existing) return existing;
+    const fresh = generateClientId();
+    await AsyncStorage.setItem(pendingClientIdKey, fresh);
+    return fresh;
+  }, [pendingClientIdKey]);
+
+  const clearPendingClientId = useCallback(async () => {
+    await AsyncStorage.removeItem(pendingClientIdKey);
+  }, [pendingClientIdKey]);
+
   const resolveExistingAuditId = useCallback(async (): Promise<string | undefined> => {
     try {
       const existingDraft = await AsyncStorage.getItem(draftKey);
@@ -277,7 +304,13 @@ export default function TankAuditFormScreen() {
           params: { siteId, createdBy: currentUserId, limit: 5 },
         });
         const results: any[] = res.data?.data || [];
-        const existing = results.find((r) => r.status === "draft") || results[0];
+        // Only ever match a draft — never fall back to the most recent
+        // record regardless of status. A site that already has a
+        // SUBMITTED audit and is being visited again for a genuinely
+        // new inspection must get its own new record; silently
+        // reusing and overwriting the old submitted one would destroy
+        // that prior audit's history.
+        const existing = results.find((r) => r.status === "draft");
         if (existing?._id) return existing._id;
       }
     } catch {
@@ -368,11 +401,15 @@ export default function TankAuditFormScreen() {
           const res = await api.get("/technician/tank-audits", {
             params: { siteId, createdBy: currentUserId, limit: 5 },
           });
-          // Prefer a draft if one exists; otherwise fall back to the
-          // most recent audit for this site (still useful as a
-          // starting point even if already submitted).
+          // Only ever hydrate from a draft — never fall back to the
+          // most recent record regardless of status. Matches
+          // resolveExistingAuditId's own fix, and for the same reason:
+          // if this fell back to a submitted record, its _id would get
+          // cached locally as auditId below, and resolveExistingAuditId
+          // checks local storage FIRST — so a stale submitted-record id
+          // would leak straight back in and defeat that fix entirely.
           const results: any[] = res.data?.data || [];
-          const existing = results.find((r) => r.status === "draft") || results[0];
+          const existing = results.find((r) => r.status === "draft");
           if (existing) {
             const { hydratedForm, hydratedSectionPhotos, hydratedLogFiles } = hydrateFromServerAudit(existing);
             setForm(hydratedForm);
@@ -507,6 +544,34 @@ export default function TankAuditFormScreen() {
   );
 
   // ── Save draft ────────────────────────────────
+  // Local-only draft persist, no network call, no Alert — preserves whatever
+  // auditId/createdBy the last manual save already resolved (if any) rather
+  // than re-resolving them, since this runs unattended on a timer and
+  // resolveExistingAuditId()/getCurrentUserId() shouldn't fire every 2 min.
+  const saveLocalDraftOnly = useCallback(async () => {
+    let auditId: string | undefined;
+    let createdBy: string | undefined;
+    try {
+      const existingStr = await AsyncStorage.getItem(draftKey);
+      if (existingStr) {
+        const existing = JSON.parse(existingStr);
+        auditId = existing.auditId;
+        createdBy = existing.createdBy;
+      }
+    } catch {
+      /* fall through without auditId/createdBy — next manual save resolves them */
+    }
+    await AsyncStorage.setItem(
+      draftKey,
+      JSON.stringify({ siteId, updatedAt: new Date().toISOString(), payload: form, sectionPhotos, logFiles, auditId, createdBy }),
+    );
+  }, [draftKey, form, sectionPhotos, logFiles, siteId]);
+
+  // Periodic silent local autosave (every 2 min) — protects in-progress tank
+  // audit entries even if the technician never taps "Save Draft" themselves.
+  // See hooks/useAutoSaveDraft.ts for the full rationale.
+  useAutoSaveDraft(saveLocalDraftOnly, { enabled: !loading });
+
   const saveDraft = useCallback(async () => {
     const currentUserId = await getCurrentUserId();
     let auditId: string | undefined = await resolveExistingAuditId();
@@ -521,17 +586,17 @@ export default function TankAuditFormScreen() {
         } catch (updateErr: any) {
           const status = updateErr?.response?.status;
           if (status === 403 || status === 404) {
-            const createClientId = generateClientId();
-            result = await submitOrQueue("tank_audit_draft", "/technician/tank-audit", "POST", { ...payload, client_id: createClientId });
-            if (result.data?._id) auditId = result.data._id;
+            const stableClientId = await getOrCreateStableClientId();
+            result = await submitOrQueue("tank_audit_draft", "/technician/tank-audit", "POST", { ...payload, client_id: stableClientId });
+            if (result.data?._id) { auditId = result.data._id; await clearPendingClientId(); }
           } else {
             throw updateErr;
           }
         }
       } else {
-        const createClientId = generateClientId();
-        result = await submitOrQueue("tank_audit_draft", "/technician/tank-audit", "POST", { ...payload, client_id: createClientId });
-        if (result.data?._id) auditId = result.data._id;
+        const stableClientId = await getOrCreateStableClientId();
+        result = await submitOrQueue("tank_audit_draft", "/technician/tank-audit", "POST", { ...payload, client_id: stableClientId });
+        if (result.data?._id) { auditId = result.data._id; await clearPendingClientId(); }
       }
 
       await AsyncStorage.setItem(
@@ -553,7 +618,7 @@ export default function TankAuditFormScreen() {
       );
       Alert.alert(t("draft_saved", "Draft Saved"), t("saved_locally", "Saved locally."));
     }
-  }, [buildPayload, draftKey, form, getCurrentUserId, resolveExistingAuditId, sectionPhotos, logFiles, siteId, t]);
+  }, [buildPayload, clearPendingClientId, draftKey, form, getCurrentUserId, getOrCreateStableClientId, resolveExistingAuditId, sectionPhotos, logFiles, siteId, t]);
 
   // ── Submit ────────────────────────────────────
   const submitAudit = useCallback(async () => {
@@ -574,18 +639,19 @@ export default function TankAuditFormScreen() {
         } catch (updateError: any) {
           const status = updateError?.response?.status;
           if (status === 403 || status === 404) {
-            const createClientId = generateClientId();
-            result = await submitOrQueue("tank_audit_submit", "/technician/tank-audit", "POST", { ...payload, client_id: createClientId });
+            const stableClientId = await getOrCreateStableClientId();
+            result = await submitOrQueue("tank_audit_submit", "/technician/tank-audit", "POST", { ...payload, client_id: stableClientId });
           } else {
             throw updateError;
           }
         }
       } else {
-        const createClientId = generateClientId();
-        result = await submitOrQueue("tank_audit_submit", "/technician/tank-audit", "POST", { ...payload, client_id: createClientId });
+        const stableClientId = await getOrCreateStableClientId();
+        result = await submitOrQueue("tank_audit_submit", "/technician/tank-audit", "POST", { ...payload, client_id: stableClientId });
       }
 
       await AsyncStorage.removeItem(draftKey);
+      await clearPendingClientId();
 
       Alert.alert(
         t("audit_submitted", "Tank Audit Submitted"),
@@ -600,7 +666,7 @@ export default function TankAuditFormScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [buildPayload, draftKey, form.logs_collected, resolveExistingAuditId, router, t]);
+  }, [buildPayload, clearPendingClientId, draftKey, form.logs_collected, getOrCreateStableClientId, resolveExistingAuditId, router, t]);
 
   if (loading) {
     return (

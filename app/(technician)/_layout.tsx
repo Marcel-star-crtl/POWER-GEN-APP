@@ -124,6 +124,7 @@ export default function TechnicianLayout() {
       <Tabs.Screen name="hse-form/[siteId]"                        options={{ href: null }} />
       <Tabs.Screen name="install-part"                             options={{ href: null }} />
       <Tabs.Screen name="parts"                                    options={{ href: null }} />
+      <Tabs.Screen name="pending-whatsapp-shares"                  options={{ href: null }} />
       <Tabs.Screen name="request-part"                             options={{ href: null }} />
       <Tabs.Screen name="select-site"                              options={{ href: null }} />
       <Tabs.Screen name="select-site-audit"                        options={{ href: null }} />

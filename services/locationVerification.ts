@@ -17,6 +17,13 @@ export interface GeofenceVerification {
   reason?: string;
   site_id: string;
   site_name?: string;
+  // Raw GPS reading this verdict was computed from (when available). Carried
+  // along so callers can forward it to the check-in action itself — the
+  // backend re-derives isInside/distanceMeters from these coordinates rather
+  // than trusting a client-reported verdict, since the verify-location call
+  // and the actual check-in are otherwise two separate, unlinked requests.
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface CurrentPosition {
@@ -88,7 +95,10 @@ export async function verifySiteLocation(site_id: string): Promise<GeofenceVerif
       latitude:  position.latitude,
       longitude: position.longitude,
     });
-    return res.data?.data ?? { verifiable: false, reason: 'Unexpected response from server', site_id };
+    const data = res.data?.data ?? { verifiable: false, reason: 'Unexpected response from server', site_id };
+    // Attach the raw reading this verdict came from (see the interface
+    // comment) so it can be forwarded by the caller.
+    return { ...data, latitude: position.latitude, longitude: position.longitude };
   } catch (e: any) {
     // Network/server issue — distinct reason from "no GPS", still non-blocking.
     return {

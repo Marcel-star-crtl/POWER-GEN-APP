@@ -2,7 +2,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { FontAwesome5 } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -280,7 +280,11 @@ export default function MaintenanceChecklist() {
           [{ text: "OK", onPress: () => router.navigate("/(technician)/dashboard") }]
         );
       } else {
-        await api.post("/technician/visits", submissionData);
+        // Was posting to '/technician/visits', which has no backend route —
+        // every "Save Draft" tap 404'd and fell into the catch block below
+        // as a generic "Failed to submit" alert. The real endpoint is
+        // '/technician/maintenance/draft'.
+        await api.post("/technician/maintenance/draft", submissionData);
         Alert.alert("Draft Saved", "Your progress has been saved.");
       }
     } catch (error: any) {

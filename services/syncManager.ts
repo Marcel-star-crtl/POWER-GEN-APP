@@ -1,11 +1,13 @@
 // services/syncManager.ts
 import NetInfo from "@react-native-community/netinfo";
+import { AppState, AppStateStatus } from "react-native";
 import { api, uploadAPI } from "./api";
 import {
   getPendingItems,
   removeItem,
   updateItem,
   countPending,
+  resetOrphanedItems,
   QueueItem,
 } from "../lib/syncQueue";
 import { markLocalPurchaseSynced } from "../lib/localPurchases";
@@ -126,17 +128,45 @@ export async function processQueue(): Promise<void> {
 
 let started = false;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
+let appStateSubscription: { remove: () => void } | null = null;
+let lastAppState: AppStateStatus = AppState.currentState;
 
 /** Call once, e.g. from your root layout, after the DB is ready. */
 export function startSyncManager() {
   if (started) return;
   started = true;
 
-  // Sync immediately, then whenever connectivity is (re)gained.
-  processQueue();
+  // Recover anything stranded at "uploading"/"syncing" by a previous app
+  // session that was killed mid-sync (see resetOrphanedItems' docstring),
+  // then sync immediately, then whenever connectivity is (re)gained.
+  resetOrphanedItems()
+    .then((n) => {
+      if (n > 0) console.warn(`[SyncManager] Recovered ${n} orphaned queue item(s) stuck mid-sync.`);
+    })
+    .catch((e) => console.error("[SyncManager] resetOrphanedItems failed:", e))
+    .finally(() => {
+      processQueue();
+    });
 
   NetInfo.addEventListener((state) => {
     if (state.isConnected && state.isInternetReachable !== false) {
+      processQueue();
+    }
+  });
+
+  // Sync whenever the app returns to the foreground. Necessary because
+  // connectivity can be restored while the app is backgrounded (walking
+  // back into signal range with the screen off, Wi-Fi reconnecting while
+  // the phone is locked) — NetInfo has no new transition to report by the
+  // time the user reopens the app (it was already "connected" from its
+  // perspective), and the 30s interval below is paused by the OS while
+  // backgrounded on both iOS and Android. Without this, a draft queued
+  // offline could sit unsynced until *something else* happens to trigger
+  // processQueue() again, which may not happen for a long time.
+  appStateSubscription = AppState.addEventListener("change", (nextState) => {
+    const cameToForeground = lastAppState.match(/inactive|background/) && nextState === "active";
+    lastAppState = nextState;
+    if (cameToForeground) {
       processQueue();
     }
   });
@@ -150,6 +180,8 @@ export function startSyncManager() {
 
 export function stopSyncManager() {
   if (intervalHandle) clearInterval(intervalHandle);
+  if (appStateSubscription) appStateSubscription.remove();
+  appStateSubscription = null;
   started = false;
 }
 

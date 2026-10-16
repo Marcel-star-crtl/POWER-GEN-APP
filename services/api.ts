@@ -10,18 +10,18 @@ console.log("✅ api.ts loaded (uploader=fetch, offline-aware)");
 // the production API if the env var isn't set.
 //
 // PREVIOUSLY: this was hardcoded to a developer's personal LAN IP
-// (192.168.1.137) with the production URL commented out above it — and
-// since no build profile in eas.json injected any override, that exact
-// same LAN-only address shipped in every build, including the production
-// app-bundle. The app was unreachable for any user not on that specific
-// developer's local WiFi network.
+// (192.168.1.137, then later 192.168.1.95) with the production URL
+// commented out above it — and since no build profile in eas.json injected
+// any override, that exact same LAN-only address shipped in every build,
+// including the production app-bundle. The app was unreachable for any
+// user not on that specific developer's local WiFi network.
 //
 // For local development against a machine on your LAN, create a
 // `.env.local` file (already gitignored — see .gitignore's `.env*.local`)
 // with:
 //   EXPO_PUBLIC_API_URL=http://<your-machine-LAN-IP>:5000
 export const SERVER_URL =
-  process.env.EXPO_PUBLIC_API_URL || "https://powergen-api-wrr1.onrender.com";
+  process.env.EXPO_PUBLIC_API_URL || "https://powergen-api-i2t7.onrender.com";
 
 console.log(
   process.env.EXPO_PUBLIC_API_URL
@@ -69,7 +69,7 @@ api.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error),
-);
+);;
 
 /**
  * Tries to recover from a 401 before giving up on the session:
@@ -170,6 +170,11 @@ export const maintenanceAPI = {
 
 export const siteAPI = {
   getSiteDetails: (siteId: string) => api.get(`/sites/${siteId}`),
+  // NOTE (audit): '/sites/:id/equipment' has no matching backend route —
+  // confirmed against the full live siteRoutes.js, which defines no
+  // '/equipment' sub-path at all (grepped, not just the one that appeared
+  // shadowed). If/when a caller needs a site's equipment roster, add the
+  // backend route first; this will 404 until then.
   getSiteEquipment: (siteId: string) => api.get(`/sites/${siteId}/equipment`),
   getSiteWithGenerators: (ihsIdSite: string) => api.get(`/sites/${ihsIdSite}`),
   getGenerator: (generatorId: string) => api.get(`/generators/${generatorId}`),

@@ -291,6 +291,17 @@ export default function RequestFuelScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            {urgency === 'critical' && (
+              <View style={styles.emergencyBanner}>
+                <FontAwesome5 name="bolt" size={13} color="#DC2626" />
+                <Text style={styles.emergencyBannerText}>
+                  {t(
+                    'critical_is_emergency',
+                    'Critical = Emergency Refueling. This request goes to every approver in the chain at once — the FIRST person to approve schedules it immediately, without waiting for the rest.'
+                  )}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Reason */}
@@ -312,17 +323,25 @@ export default function RequestFuelScreen() {
           {/* Approval Chain Preview */}
           <View style={styles.section}>
             <Text style={styles.label}>{t('approval_chain', 'Approval Chain')}</Text>
+            {urgency === 'critical' ? (
+              <Text style={styles.chainNote}>
+                {t(
+                  'critical_chain_note',
+                  '* Emergency mode — all approvers below are notified at the same time. Any ONE of them approving is enough.'
+                )}
+              </Text>
+            ) : null}
             <View style={styles.chainBox}>
               {CHAIN.filter(s => s.level < 6 || needsCEO).map((s, i, arr) => (
                 <View key={s.level} style={styles.chainStep}>
-                  <View style={styles.chainDot}>
+                  <View style={[styles.chainDot, urgency === 'critical' && styles.chainDotCritical]}>
                     <Text style={styles.chainDotText}>{s.level}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.chainName}>{s.name}</Text>
                     <Text style={styles.chainRole}>{s.role}</Text>
                   </View>
-                  {i < arr.length - 1 && <View style={styles.chainLine} />}
+                  {i < arr.length - 1 && urgency !== 'critical' && <View style={styles.chainLine} />}
                 </View>
               ))}
               {!needsCEO && (
@@ -391,6 +410,9 @@ const styles = StyleSheet.create({
   urgencyRow:   { flexDirection: 'row', gap: 8 },
   urgencyBtn:   { flex: 1, paddingVertical: 9, borderRadius: 8, borderWidth: 1.5, borderColor: '#E5E7EB', alignItems: 'center', backgroundColor: '#F9FAFB' },
   urgencyText:  { fontSize: 11, fontWeight: '700', color: '#6B7280' },
+  emergencyBanner:     { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 10, marginTop: 10 },
+  emergencyBannerText: { flex: 1, fontSize: 12, color: '#991B1B', fontWeight: '600', lineHeight: 17 },
+  chainDotCritical:    { backgroundColor: '#DC2626' },
   reasonInput:  { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 12, fontSize: 14, color: '#111827', minHeight: 110, backgroundColor: '#F9FAFB' },
   charCount:    { fontSize: 10, color: '#9CA3AF', textAlign: 'right', marginTop: 4 },
   chainBox:     { backgroundColor: '#FFF5F5', borderRadius: 8, padding: 12 },

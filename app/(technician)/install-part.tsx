@@ -14,6 +14,7 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { PhotoAttachment, PhotoCapture } from '../../components/ui/PhotoCapture';
 import { submitOrQueue } from '../../services/offlineApi';
 
 export default function PartInstallationScreen() {
@@ -39,10 +40,27 @@ export default function PartInstallationScreen() {
   const [testPerformed, setTestPerformed] = useState(false);
   const [testResult, setTestResult] = useState('');
   const [notes, setNotes] = useState('');
-  
+
+  // Photos of the old part being removed (optional) and of the completed install (optional)
+  const [oldPartPhotos, setOldPartPhotos] = useState<PhotoAttachment[]>([]);
+  const [installPhotos, setInstallPhotos] = useState<PhotoAttachment[]>([]);
+
   const [loading, setLoading] = useState(false);
 
   const isReplacement = params.isReplacement === 'true';
+
+  const handleAddOldPartPhoto = (photo: PhotoAttachment) => {
+    setOldPartPhotos((prev) => [...prev, photo]);
+  };
+  const handleRemoveOldPartPhoto = (uri: string) => {
+    setOldPartPhotos((prev) => prev.filter((p) => p.uri !== uri));
+  };
+  const handleAddInstallPhoto = (photo: PhotoAttachment) => {
+    setInstallPhotos((prev) => [...prev, photo]);
+  };
+  const handleRemoveInstallPhoto = (uri: string) => {
+    setInstallPhotos((prev) => prev.filter((p) => p.uri !== uri));
+  };
 
   const handleSubmit = async () => {
     // Validate
@@ -58,7 +76,15 @@ export default function PartInstallationScreen() {
     try {
         setLoading(true);
 
-        const payload = {
+        // The backend's /technician/install-part handler already destructures a
+        // single `photos` field off req.body (array of URLs), so both the old-part
+        // removal photos and the completed-install photos are merged into one flat
+        // array here. Pass bare local URIs (not {uri,name,type} objects) — offlineApi's
+        // submitOrQueue/processAndUploadData collapses each local file:// / content://
+        // string to its uploaded remote URL string in place.
+        const allPhotos = [...oldPartPhotos, ...installPhotos].map((p) => p.uri);
+
+        const payload: any = {
             requestId: params.requestId,
             part_name: params.partName,
             site_name: params.siteName,
@@ -72,6 +98,10 @@ export default function PartInstallationScreen() {
             test_result: testResult,
             notes: notes
         };
+
+        if (allPhotos.length > 0) {
+            payload.photos = allPhotos;
+        }
 
         const result = await submitOrQueue('install_part', '/technician/install-part', 'POST', payload);
 
@@ -166,13 +196,13 @@ export default function PartInstallationScreen() {
                     </View>
                 </View>
 
-                <View style={styles.fieldContainer}>
-                    <Text style={styles.label}>Photos (Optional)</Text>
-                    <TouchableOpacity style={styles.photoButton}>
-                        <FontAwesome5 name="camera" size={16} color={Colors.textSecondary} />
-                        <Text style={styles.photoButtonText}>Take Photo</Text>
-                    </TouchableOpacity>
-                </View>
+                <PhotoCapture
+                    label="Photos of Removed Part (Optional)"
+                    photos={oldPartPhotos}
+                    onAddPhoto={handleAddOldPartPhoto}
+                    onRemovePhoto={handleRemoveOldPartPhoto}
+                    maxPhotos={3}
+                />
             </Card>
         )}
 
@@ -194,6 +224,14 @@ export default function PartInstallationScreen() {
                     onChangeText={setNewSerial}
                 />
             </View>
+
+            <PhotoCapture
+                label="Photos of Completed Install (Optional)"
+                photos={installPhotos}
+                onAddPhoto={handleAddInstallPhoto}
+                onRemovePhoto={handleRemoveInstallPhoto}
+                maxPhotos={3}
+            />
         </Card>
 
         <Card style={styles.section}>

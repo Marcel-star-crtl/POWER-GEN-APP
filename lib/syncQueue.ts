@@ -60,6 +60,31 @@ export async function getPendingItems(): Promise<QueueItem[]> {
   return rows.map(rowToItem);
 }
 
+/**
+ * Resets any item still stuck at "uploading" or "syncing" back to "pending".
+ *
+ * Those two statuses only ever exist transiently while processItem() is
+ * mid-flight (see services/syncManager.ts). If the app is killed, crashes,
+ * or the process is otherwise torn down while an item is in one of those
+ * states, it's left stranded there forever: getPendingItems() only selects
+ * 'pending'/'failed', so the item is silently never retried and the
+ * technician's submitted record is effectively lost, even though
+ * countPending() keeps counting it (so the UI still shows it as
+ * "N pending" with no way to make progress on it).
+ *
+ * Call this once at app start, before the first processQueue() call, so any
+ * item orphaned by a previous session's abrupt termination gets picked back
+ * up on the next sync pass.
+ */
+export async function resetOrphanedItems(): Promise<number> {
+  const db = await getDb();
+  const result = await db.runAsync(
+    `UPDATE sync_queue SET status = 'pending', updated_at = ? WHERE status IN ('uploading','syncing')`,
+    [Date.now()],
+  );
+  return result.changes ?? 0;
+}
+
 export async function getAllItems(): Promise<QueueItem[]> {
   const db = await getDb();
   const rows = await db.getAllAsync(`SELECT * FROM sync_queue ORDER BY created_at DESC`);

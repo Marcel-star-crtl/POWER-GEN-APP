@@ -13,6 +13,9 @@ interface FormSectionProps {
   children: React.ReactNode;
   collapsible?: boolean;
   defaultOpen?: boolean;
+  /** Optional status indicator rendered in the header, e.g. a "3 remaining" / "Complete" chip.
+   *  Purely additive — omit it and this component behaves exactly as before. */
+  statusChip?: React.ReactNode;
 }
 
 export const FormSection: React.FC<FormSectionProps> = ({
@@ -21,6 +24,7 @@ export const FormSection: React.FC<FormSectionProps> = ({
   children,
   collapsible = false,
   defaultOpen = true,
+  statusChip,
 }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
@@ -48,13 +52,16 @@ export const FormSection: React.FC<FormSectionProps> = ({
           )}
           <Text style={styles.title}>{t(title, title)}</Text>
         </View>
-        {collapsible && (
-          <Ionicons 
-            name={isOpen ? 'chevron-up' : 'chevron-down'} 
-            size={20} 
-            color={Colors.textSecondary} 
-          />
-        )}
+        <View style={styles.headerRight}>
+          {statusChip}
+          {collapsible && (
+            <Ionicons
+              name={isOpen ? 'chevron-up' : 'chevron-down'}
+              size={20}
+              color={Colors.textSecondary}
+            />
+          )}
+        </View>
       </TouchableOpacity>
       
       {isOpen && (
@@ -92,6 +99,11 @@ const styles = StyleSheet.create({
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   iconContainer: {
     width: 32,

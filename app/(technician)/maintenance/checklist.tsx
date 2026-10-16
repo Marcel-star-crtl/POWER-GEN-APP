@@ -177,17 +177,7 @@ export default function MaintenanceChecklist() {
     setChecks(filtered.map((c) => ({ ...c, status: "pending" }) as CheckItem));
   }, [type, user?.role]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (readOnly === "true") {
-        fetchServerProgress();
-      } else {
-        checkProgress();
-      }
-    }, [checks.length, siteId, readOnly, maintenanceId]),
-  );
-
-  const fetchServerProgress = async () => {
+  const fetchServerProgress = useCallback(async () => {
     if (!maintenanceId) return;
     try {
       const { data: res } = await cachedGet(`/technician/maintenance/${maintenanceId}`);
@@ -213,10 +203,10 @@ export default function MaintenanceChecklist() {
     } catch (e) {
       console.error("Error fetching server progress", e);
     }
-  };
+  }, [checks, maintenanceId]);
 
   // Improved check: look for both local drafts (AsyncStorage) and server-saved data (if maintenanceId present)
-  const checkProgress = async () => {
+  const checkProgress = useCallback(async () => {
     if (checks.length === 0) return;
 
     let serverChecks: any = {};
@@ -265,7 +255,25 @@ export default function MaintenanceChecklist() {
     } catch (e) {
       console.error("Error checking progress", e);
     }
-  };
+  }, [checks, maintenanceId, siteId]);
+
+  // checkProgress/fetchServerProgress are useCallback-memoized above so this
+  // effect's own deps can reference the MEMOIZED functions themselves
+  // rather than a hand-picked primitive like `checks.length`. Previously,
+  // depending on `checks.length` meant this callback was NOT recreated when
+  // an item's `status` changed in place (same array length) — so refocusing
+  // this screen could re-invoke an earlier render's checkProgress/
+  // fetchServerProgress closure, which compared against a stale `checks`
+  // snapshot and could miss a just-completed check.
+  useFocusEffect(
+    useCallback(() => {
+      if (readOnly === "true") {
+        fetchServerProgress();
+      } else {
+        checkProgress();
+      }
+    }, [checkProgress, fetchServerProgress, readOnly]),
+  );
 
   const handlePressCheck = (checkType: string) => {
     router.push({
@@ -362,7 +370,11 @@ export default function MaintenanceChecklist() {
         );
       } else {
         // Draft logic
-        await api.post("/technician/visits", submissionData);
+        // Was posting to '/technician/visits', which has no backend route —
+        // every "Save Draft" tap 404'd and fell into the catch block below
+        // as a generic "Failed to submit data" alert. The real endpoint is
+        // '/technician/maintenance/draft'.
+        await api.post("/technician/maintenance/draft", submissionData);
         Alert.alert("Draft Saved", "Your progress has been saved.");
       }
     } catch (error: any) {

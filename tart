@@ -1,0 +1,36 @@
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/(technician)/profile.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/(technician)/tank-audit-form/[siteId].tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'services/locationVerification.ts', LF will be replaced by CRLF the next time Git touches it
+ .env                                              |     3 [32m+[m[31m-[m
+ .env.example                                      |     2 [32m+[m[31m-[m
+ app.json                                          |    13 [32m+[m[31m-[m
+ app/(technician)/_layout.tsx                      |     1 [32m+[m
+ app/(technician)/audit-form/[siteId].tsx          |    50 [32m+[m
+ app/(technician)/dashboard.tsx                    |    51 [32m+[m[31m-[m
+ app/(technician)/history.tsx                      |    24 [32m+[m[31m-[m
+ app/(technician)/hse-form/[siteId].tsx            |    82 [32m+[m[31m-[m
+ app/(technician)/install-part.tsx                 |    56 [32m+[m[31m-[m
+ app/(technician)/maintenance/[id].tsx             |     8 [32m+[m[31m-[m
+ app/(technician)/maintenance/checklist.tsx        |    42 [32m+[m[31m-[m
+ app/(technician)/maintenance/equipment/[type].tsx |   211 [32m+[m[31m-[m
+ app/(technician)/profile.tsx                      |    23 [32m+[m
+ app/(technician)/refueling-flow/check-in-site.tsx |     7 [32m+[m
+ app/(technician)/refueling-flow/request-fuel.tsx  |    26 [32m+[m[31m-[m
+ app/(technician)/refueling-flow/summary.tsx       |   113 [32m+[m[31m-[m
+ app/(technician)/refueling/form.tsx               |   345 [32m+[m[31m-[m
+ app/(technician)/refueling/index.tsx              |     2 [32m+[m[31m-[m
+ app/(technician)/refueling/select-site.tsx        |     2 [32m+[m[31m-[m
+ app/(technician)/request-part.tsx                 |    30 [32m+[m[31m-[m
+ app/(technician)/tank-audit-form/[siteId].tsx     |   100 [32m+[m[31m-[m
+ components/ui/FormSection.tsx                     |    26 [32m+[m[31m-[m
+ components/ui/StatusToggle.tsx                    |    55 [32m+[m[31m-[m
+ lib/syncQueue.ts                                  |    25 [32m+[m
+ package-lock.json                                 | 13730 [31m--------------------[m
+ package.json                                      |    68 [32m+[m[31m-[m
+ services/api.ts                                   |    19 [32m+[m[31m-[m
+ services/locationVerification.ts                  |    12 [32m+[m[31m-[m
+ services/syncManager.ts                           |    36 [32m+[m[31m-[m
+ yarn.lock                                         |  5348 [32m++++[m[31m----[m
+ 30 files changed, 3648 insertions(+), 16862 deletions(-)

@@ -23,6 +23,7 @@ import {
 import { Colors } from "../../../constants/Colors";
 import { siteAPI } from "../../../services/api";
 import { submitOrQueue, generateClientId } from "../../../services/offlineApi";
+import { useAutoSaveDraft } from "../../../hooks/useAutoSaveDraft";
 import { TechnicianSiteAuditForm as TechnicianSiteAuditFormType } from "../../../types/technician-audit.types";
 
 // ─────────────────────────────────────────────
@@ -451,6 +452,19 @@ export default function TechnicianSiteAuditForm() {
       router.replace("/(technician)/dashboard");
       return;
     }
+    // Reset immediately, before the async load even starts. Expo Router can
+    // reuse this component instance when navigating between different
+    // sites on this same dynamic route (a real, observed behavior — see the
+    // identical fix in tank-audit-form/[siteId].tsx) rather than remounting
+    // it, so without this reset a technician who opens Site B's audit right
+    // after Site A's would see — and could submit — Site A's generator,
+    // cabinet, battery, etc. data under Site B until the async load below
+    // happens to overwrite every field (which it won't if the new site has
+    // no draft and the site-details fetch fails, per loadSiteAndDraft above).
+    setLoading(true);
+    setForm(buildInitialForm(siteId));
+    setSectionPhotos({});
+    setSiteDetails(null);
     loadSiteAndDraft();
   }, [loadSiteAndDraft, router, siteId]);
 
@@ -470,6 +484,42 @@ export default function TechnicianSiteAuditForm() {
   // ── Save draft ────────────────────────────────
   // NOTE: photos are sent RAW (local uri, category, description) — submitOrQueue
   // owns uploading them, whether online or via the offline sync queue.
+  // Local-only draft persist, no network call, no Alert — preserves whatever
+  // auditId/createdBy the last manual save already resolved (if any) rather
+  // than re-resolving them, since this runs unattended on a timer and
+  // getCurrentUserId() shouldn't fire every 2 min. Matches the identical
+  // pattern in tank-audit-form/[siteId].tsx.
+  const saveLocalDraftOnly = useCallback(async () => {
+    let auditId: string | undefined;
+    let createdBy: string | undefined;
+    try {
+      const existingStr = await AsyncStorage.getItem(draftKey);
+      if (existingStr) {
+        const existing = JSON.parse(existingStr);
+        auditId = existing.auditId;
+        createdBy = existing.createdBy;
+      }
+    } catch {
+      /* fall through without auditId/createdBy — next manual save resolves them */
+    }
+    await AsyncStorage.setItem(
+      draftKey,
+      JSON.stringify({
+        siteId,
+        updatedAt: new Date().toISOString(),
+        payload: form,
+        sectionPhotos,
+        auditId,
+        createdBy,
+      }),
+    );
+  }, [draftKey, form, sectionPhotos, siteId]);
+
+  // Periodic silent local autosave (every 2 min) — protects in-progress site
+  // audit entries even if the technician never taps "Save Draft" themselves.
+  // See hooks/useAutoSaveDraft.ts for the full rationale.
+  useAutoSaveDraft(saveLocalDraftOnly, { enabled: !loading });
+
   const saveDraft = useCallback(async () => {
     const currentUserId = await getCurrentUserId();
     let auditId: string | undefined;
